@@ -4,6 +4,7 @@ import {
     LineEdit,
     AboutSlint,
     Spinner,
+    HorizontalBox,
 } from "std-widgets.slint";
 
 enum LoginStatus {
@@ -27,9 +28,7 @@ export global UserInfo {
 }
 
 component LoginPage {
-    VerticalLayout {
-        spacing: 10px;
-
+    VerticalBox {
         Text {
             text: LoginLogic.login-status == LoginStatus.Waiting ? "请使用B站APP扫码登录" :      //
                    LoginLogic.login-status == LoginStatus.Confirming ? "请在手机上确认登录" :     //
@@ -70,16 +69,31 @@ component LoginPage {
 }
 
 component MainPage {
-    VerticalLayout {
-        spacing: 10px;
+    VerticalBox {
+        HorizontalBox {
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                clip: true;
+                border-radius: 20px;
+                Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: UserInfo.face;
+                }
+            }
 
-        Image {
-            source: UserInfo.face;
+            Text {
+                text: UserInfo.uname;
+                font-size: 15px;
+                vertical-alignment: center;
+            }
         }
 
-        Text {
-            text: UserInfo.uname;
-            horizontal-alignment: center;
+        VerticalBox {
+            Button {
+                text: "开始直播";
+            }
         }
     }
 }
