@@ -75,10 +75,6 @@ async fn init_user_info(user_info: Weak<UserInfo<'static>>) -> bool {
 }
 
 /// Refresh the QR code and update the login state to Polling. If already logged in, do nothing.
-///
-/// # Cancel safety
-///
-/// Not cancel safe.
 async fn refresh_qr_code(login_logic: Weak<LoginLogic<'static>>) -> anyhow::Result<()> {
     let response = bili_api::generate_passport_qrcode().await?;
     let qrcode = QrCode::new(response.url.as_str())?;
