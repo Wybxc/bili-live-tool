@@ -1,0 +1,92 @@
+import {
+    Button,
+    VerticalBox,
+    LineEdit,
+    AboutSlint,
+    Spinner,
+} from "std-widgets.slint";
+
+enum LoginStatus {
+    Waiting,
+    Confirming,
+    Expired,
+    Success,
+}
+
+export global LoginLogic {
+    in-out property <image> qr-code;
+    in-out property <LoginStatus> login-status: LoginStatus.Waiting;
+    in-out property <string> oauth-key;
+    in-out property <bool> qr-code-ready: false;
+    callback refresh-qr-code();
+}
+
+export global UserInfo {
+    in-out property <image> face;
+    in-out property <string> uname;
+}
+
+component LoginPage {
+    VerticalLayout {
+        spacing: 10px;
+
+        Text {
+            text: LoginLogic.login-status == LoginStatus.Waiting ? "请使用B站APP扫码登录" :      //
+                   LoginLogic.login-status == LoginStatus.Confirming ? "请在手机上确认登录" :     //
+                   LoginLogic.login-status == LoginStatus.Expired ? "二维码已过期，请刷新" :       //
+                   LoginLogic.login-status == LoginStatus.Success ? "登录成功！" : "未知状态";    //
+            horizontal-alignment: center;
+        }
+
+        if LoginLogic.qr-code-ready:
+        Image {
+            width: 300px;
+            height: 300px;
+            source: LoginLogic.qr-code;
+            image-fit: contain;
+            image-rendering: pixelated;
+        }
+
+        if !LoginLogic.qr-code-ready:
+        Rectangle {
+            width: 300px;
+            height: 300px;
+            background: #eee;
+            border-radius: 10px;
+
+            Spinner {
+                indeterminate: true;
+            }
+        }
+
+        Button {
+            text: "刷新二维码";
+            clicked => {
+                LoginLogic.qr-code-ready = false;
+                LoginLogic.refresh-qr-code()
+            }
+        }
+    }
+}
+
+component MainPage {
+    VerticalLayout {
+        spacing: 10px;
+
+        Image {
+            source: UserInfo.face;
+        }
+
+        Text {
+            text: UserInfo.uname;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Bili Live Tool";
+
+    if LoginLogic.login-status != LoginStatus.Success: LoginPage { }
+    if LoginLogic.login-status == LoginStatus.Success: MainPage { }
+}
