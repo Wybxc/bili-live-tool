@@ -113,6 +113,7 @@ async fn poll_login_status(
             bili_api::PollPassportQrcodeStatusCode::Success => {
                 init_user_info(user_info).await;
                 login_logic.unwrap().set_login_status(LoginStatus::Success);
+                bili_api::save_cookies();
                 tracing::info!("Login success");
                 break;
             }

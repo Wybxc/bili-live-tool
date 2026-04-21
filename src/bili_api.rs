@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::sync::{Arc, LazyLock};
+use std::{
+    io::BufReader,
+    sync::{Arc, LazyLock},
+};
 
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use smol_str::SmolStr;
@@ -392,9 +395,30 @@ fn deserialize_nav_user_info() {
 }
 
 pub static COOKIE_STORE: LazyLock<Arc<CookieStoreMutex>> = LazyLock::new(|| {
-    let store = CookieStore::new(); // TODO: make this persistent
+    let store = load_cookies().unwrap_or_default();
     Arc::new(CookieStoreMutex::new(store))
 });
+
+fn load_cookies() -> Option<CookieStore> {
+    let dirs = directories::ProjectDirs::from("cc", "wybxc", "bili-live-tool")?;
+    let path = dirs.data_dir().join("cookies.json");
+    let file = std::fs::File::open(&path).ok()?;
+    cookie_store::serde::json::load(BufReader::new(file)).ok()
+}
+
+pub fn save_cookies() {
+    let dirs = match directories::ProjectDirs::from("cc", "wybxc", "bili-live-tool") {
+        Some(dirs) => dirs,
+        None => return,
+    };
+    let path = dirs.data_dir().join("cookies.json");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if let Ok(mut file) = std::fs::File::create(&path) {
+        let _ = cookie_store::serde::json::save(&COOKIE_STORE.lock().unwrap(), &mut file);
+    }
+}
 
 fn client() -> reqwest_middleware::ClientWithMiddleware {
     let client = reqwest::Client::builder()
