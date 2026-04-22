@@ -584,6 +584,53 @@ fn deserialize_live_version() {
     assert_eq!(data.build, 9432);
 }
 
+pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
+    let client = client();
+    let response = client
+        .post(URL)
+        .form(&[
+            ("room_id", room_id.to_string().as_str()),
+            ("platform", "pc_link"),
+            ("title", title),
+            ("csrf_token", csrf),
+            ("csrf", csrf),
+        ])
+        .send()
+        .await?;
+    let json: Response<()> = response.json().await?;
+    tracing::info!(
+        "Updated live stream title to '{}' for room_id {}",
+        title,
+        room_id
+    );
+    json.into_data()
+}
+
+pub async fn update_area(room_id: u64, area_id: &str, csrf: &str) -> Result<()> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
+    let client = client();
+    let response = client
+        .post(URL)
+        .form(&[
+            ("room_id", room_id.to_string().as_str()),
+            ("area_id", area_id),
+            ("platform", "pc_link"),
+            ("csrf_token", csrf),
+            ("csrf", csrf),
+        ])
+        .send()
+        .await
+        .unwrap();
+    let json: Response<()> = response.json().await?;
+    tracing::info!(
+        "Updated live stream area to '{}' for room_id {}",
+        area_id,
+        room_id
+    );
+    json.into_data()
+}
+
 #[derive(serde::Deserialize, Default, Debug)]
 pub struct StartLiveResponse {
     pub rtmp: Rtmp,
@@ -605,8 +652,8 @@ pub struct Protocol {
 
 pub async fn start_live(
     room_id: u64,
-    area_id: SmolStr,
-    csrf: SmolStr,
+    area_id: &str,
+    csrf: &str,
     version: LiveVersion,
     timestamp: u64,
 ) -> Result<StartLiveResponse> {
@@ -716,15 +763,15 @@ fn deserialize_start_live_response() {
     );
 }
 
-pub async fn stop_live(room_id: u64, csrf: SmolStr) -> Result<()> {
+pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/stopLive";
     let client = client();
     let response = client
         .post(URL)
-        .form::<[(&str, serde_json::Value)]>(&[
-            ("platform", "pc_link".into()),
-            ("room_id", room_id.into()),
-            ("csrf", csrf.to_string().into()),
+        .form(&[
+            ("platform", "pc_link"),
+            ("room_id", room_id.to_string().as_str()),
+            ("csrf", csrf),
         ])
         .send()
         .await?;
