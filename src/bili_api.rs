@@ -781,6 +781,21 @@ pub fn save_cookies() {
     }
 }
 
+pub fn clear_cookies() {
+    COOKIE_STORE.lock().unwrap().clear();
+    save_cookies();
+}
+
+pub fn get_csrf_token() -> Option<SmolStr> {
+    let store = COOKIE_STORE.lock().unwrap();
+    for cookie in store.iter_any() {
+        if cookie.name() == "bili_jct" {
+            return Some(cookie.value().into());
+        }
+    }
+    None
+}
+
 fn client() -> reqwest_middleware::ClientWithMiddleware {
     static CLIENT: LazyLock<reqwest_middleware::ClientWithMiddleware> = LazyLock::new(|| {
         let client = reqwest::Client::builder()

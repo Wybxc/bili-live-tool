@@ -21,6 +21,7 @@ export global LoginLogic {
     in-out property <string> oauth-key;
     in-out property <bool> qr-code-ready: false;
     callback refresh-qr-code();
+    callback logout();
 }
 
 export global UserLogic {
@@ -101,6 +102,7 @@ component MainPage {
 
             Button {
                 text: "退出登录";
+                clicked => LoginLogic.logout();
             }
         }
 

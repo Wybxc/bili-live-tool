@@ -47,6 +47,15 @@ fn init(window: &MainWindow) {
         move || spawn(refresh_qr_code(login.clone()))
     });
 
+    login.on_logout({
+        let login = login.as_weak();
+        let user = user.as_weak();
+        move || {
+            spawn(logout(login.clone()));
+            spawn(poll_login_status(login.clone(), user.clone()));
+        }
+    });
+
     live.on_update_sub_area_list({
         let live = live.as_weak();
         move || spawn(update_sub_area_list(live.clone()))
@@ -151,6 +160,14 @@ async fn poll_login_status(
     Ok(())
 }
 
+async fn logout(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()> {
+    bili_api::clear_cookies();
+    login.unwrap().set_qr_code_ready(false);
+    login.unwrap().set_login_status(LoginStatus::Waiting);
+    refresh_qr_code(login).await?;
+    Ok(())
+}
+
 async fn live_area_list() -> Option<Arc<Vec<Area>>> {
     static AREA_LIST: async_once_cell::OnceCell<Arc<Vec<Area>>> = async_once_cell::OnceCell::new();
     AREA_LIST
@@ -173,7 +190,7 @@ async fn init_live_area_list(live: Weak<LiveLogic<'static>>) {
             .first()
             .map(|area| area.name.as_str().into())
             .unwrap_or_default(),
-    );
+    ); // TODO: persist the selected area
 }
 
 async fn update_sub_area_list(live: Weak<LiveLogic<'static>>) {
