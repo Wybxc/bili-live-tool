@@ -6,7 +6,7 @@ use std::{
 };
 
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
-use smol_str::{format_smolstr, SmolStr};
+use smol_str::SmolStr;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -484,6 +484,138 @@ fn deserialize_live_version() {
     let data = response.into_data().unwrap();
     assert_eq!(data.curr_version, "7.19.0.9432");
     assert_eq!(data.build, 9432);
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct StartLiveResponse {
+    pub rtmp: Rtmp,
+    pub protocols: Vec<Protocol>,
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct Rtmp {
+    pub addr: SmolStr,
+    pub code: SmolStr,
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct Protocol {
+    pub protocol: SmolStr,
+    pub addr: SmolStr,
+    pub code: SmolStr,
+}
+
+pub async fn start_live(
+    room_id: u64,
+    area_id: u64,
+    csrf: SmolStr,
+    version: LiveVersion,
+    timestamp: u64,
+) -> Result<StartLiveResponse> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/startLive";
+    let client = client();
+    let response = client
+        .post(URL)
+        .form(&app_sign(vec![
+            ("room_id", room_id.into()),
+            ("area_v2", area_id.into()),
+            ("platform", "pc_link".into()),
+            ("backup_stream", "0".into()),
+            ("csrf_token", csrf.to_string().into()),
+            ("csrf", csrf.to_string().into()),
+            ("build", version.build.into()),
+            ("version", version.curr_version.to_string().into()),
+            ("ts", timestamp.into()),
+        ]))
+        .send()
+        .await?;
+    let response: Response<StartLiveResponse> = response.json().await?;
+    tracing::info!(
+        "Started live stream: RTMP addr {}, code {}, {} protocol(s) available",
+        response
+            .data
+            .as_ref()
+            .map(|d| d.rtmp.addr.as_str())
+            .unwrap_or("N/A"),
+        response
+            .data
+            .as_ref()
+            .map(|d| d.rtmp.code.as_str())
+            .unwrap_or("N/A"),
+        response
+            .data
+            .as_ref()
+            .map(|d| d.protocols.len())
+            .unwrap_or(0)
+    );
+    response.into_data()
+}
+
+#[cfg(test)]
+#[test]
+fn deserialize_start_live_response() {
+    let json_str = r#"{
+        "code": 0,
+        "data":{
+            "change": 1,
+            "status": "LIVE",
+            "try_time": "0000-00-00 00:00:00",
+            "room_type": 0,
+            "live_key": "608336837537435443",
+            "sub_session_key": "608336837537435443sub_time:1747292297",
+            "rtmp":{
+                "type": 1,
+                "addr": "rtmp://live-push.bilivideo.com/live-bvc/",
+                "code": "?streamname=live_348892132_32373699\u0026key=e03061d4a7529d8eaa322dc4d330ca1c\u0026schedule=rtmp\u0026pflag=11",
+                "new_link": "https://core.bilivideo.com/video/uplinkcore/selfbuild/schedule?up_rtmp=live-push.bilivideo.com%2Flive-bvc%2F%3Fstreamname%3Dlive_348892132_32373699%26key%3De73061d8a7539d8eaa233dc4d880ca1c%26schedule%3Drtmp%26pflag%3D11\u0026edge=edge",
+                "provider": "live"
+            },
+            "protocols":[
+                {
+                    "protocol": "rtmp",
+                    "addr": "rtmp://live-push.bilivideo.com/live-bvc/","code":"?streamname=live_348892132_32373699\u0026key=e73061d4a1002d8eaa322dc4d880ca1c\u0026schedule=rtmp\u0026pflag=11",
+                    "new_link": "https://core.bilivideo.com/video/uplinkcore/selfbuild/schedule?up_rtmp=live-push.bilivideo.com%2Flive-bvc%2F%3Fstreamname%3Dlive_348892132_32373699%26key%3De10298d4a7539d8eaa322dc4d220ca1c%26schedule%3Drtmp%26pflag%3D11\u0026edge=edge",
+                    "provider": "txy"
+                }
+            ],
+            "notice":{
+                "type": 1,
+                "status": 0,
+                "title": "",
+                "msg": "",
+                "button_text": "",
+                "button_url": ""
+            },
+            "qr": "",
+            "need_face_auth": false,
+            "service_source": "live-streaming",
+            "rtmp_backup": null,
+            "up_stream_extra":{
+                "isp": "电信"
+            }
+        },
+        "message": "",
+        "msg": ""
+    }"#;
+    let response: Response<StartLiveResponse> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 0);
+    assert_eq!(response.message, "");
+    let data = response.into_data().unwrap();
+    assert_eq!(data.rtmp.addr, "rtmp://live-push.bilivideo.com/live-bvc/");
+    assert_eq!(
+        data.rtmp.code,
+        r"?streamname=live_348892132_32373699&key=e03061d4a7529d8eaa322dc4d330ca1c&schedule=rtmp&pflag=11"
+    );
+    assert_eq!(data.protocols.len(), 1);
+    assert_eq!(data.protocols[0].protocol, "rtmp");
+    assert_eq!(
+        data.protocols[0].addr,
+        "rtmp://live-push.bilivideo.com/live-bvc/"
+    );
+    assert_eq!(
+        data.protocols[0].code,
+        r"?streamname=live_348892132_32373699&key=e73061d4a1002d8eaa322dc4d880ca1c&schedule=rtmp&pflag=11"
+    );
 }
 
 pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_json::Value)> {
