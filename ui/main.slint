@@ -6,6 +6,8 @@ import {
     Spinner,
     HorizontalBox,
     ComboBox,
+    StyleMetrics,
+    Palette,
 } from "std-widgets.slint";
 
 enum LoginStatus {
@@ -22,6 +24,9 @@ enum RoomIdStatus {
 }
 
 export global Logic {
+    // Notifications
+    in-out property <[string]> notifications: [];
+
     // Login
     in-out property <image> qr-code;
     in-out property <LoginStatus> login-status: LoginStatus.Waiting;
@@ -171,9 +176,39 @@ component MainPage {
     }
 }
 
+component Notifications {
+    VerticalBox {
+        for notification in Logic.notifications: Rectangle {
+            border-radius: 5px;
+            background: Palette.control-background;
+
+            HorizontalBox {
+                Text {
+                    text: notification;
+                    color: Palette.control-foreground;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+
+                    opacity: 0.0;
+                    init => {
+                        self.opacity = 1.0;
+                    }
+                    animate opacity { duration: 0.2s; }
+                }
+            }
+        }
+    }
+}
+
 export component MainWindow inherits Window {
     title: "Bili Live Tool";
+    width: 600px;
+    height: 500px;
 
     if Logic.login-status != LoginStatus.Success: LoginPage { }
     if Logic.login-status == LoginStatus.Success: MainPage { }
+
+    notifications := Notifications {
+        y: 0;
+    }
 }

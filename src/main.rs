@@ -9,7 +9,9 @@ use std::{
 
 use image::Rgb;
 use qrcode::QrCode;
-use slint::{Image, JoinHandle, ModelRc, Rgb8Pixel, SharedPixelBuffer, VecModel, Weak};
+use slint::{
+    Image, JoinHandle, Model, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
+};
 
 use crate::bili_api::Area;
 
@@ -40,6 +42,24 @@ fn main() -> anyhow::Result<()> {
     init(&ui);
     ui.run()?;
     Ok(())
+}
+
+fn toast(logic: Weak<Logic<'static>>, message: &str) {
+    let notifications = logic.unwrap().get_notifications();
+    let notifications = notifications
+        .as_any()
+        .downcast_ref::<VecModel<SharedString>>()
+        .unwrap();
+    notifications.push(message.into());
+    spawn(async move {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let notifications = logic.unwrap().get_notifications();
+        let notifications = notifications
+            .as_any()
+            .downcast_ref::<VecModel<SharedString>>()
+            .unwrap();
+        notifications.remove(0);
+    });
 }
 
 fn init(window: &MainWindow) {
@@ -291,7 +311,7 @@ async fn update_sub_area_list(logic: Weak<Logic<'static>>) {
 }
 
 async fn update_live_area(logic: Weak<Logic<'static>>) {
-    todo!()
+    // let area
 }
 
 async fn update_live_title(logic: Weak<Logic<'static>>) {
@@ -307,7 +327,10 @@ async fn update_live_title(logic: Weak<Logic<'static>>) {
     };
     if let Err(e) = bili_api::update_title(room_id, &title, &csrf).await {
         tracing::error!("Failed to update live title: {}", e);
+        toast(logic, &format!("更新标题失败：{}", e));
+        return;
     }
+    toast(logic, "更新标题成功");
 }
 
 fn spawn<F: std::future::Future + 'static>(f: F) -> JoinHandle<F::Output> {
