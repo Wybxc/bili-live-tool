@@ -398,10 +398,10 @@ fn deserialize_nav_user_info() {
 
 #[derive(serde::Deserialize, Default, Debug)]
 pub struct RoomId {
-    room_id: u64,
+    pub room_id: u64,
 }
 
-pub async fn get_room_id(user_id: u64) -> Result<u64> {
+pub async fn get_room_id(user_id: u64) -> Result<RoomId> {
     const URL: &str = "https://api.live.bilibili.com/room/v2/Room/room_id_by_uid";
     let client = client();
     let response = client.get(URL).query(&[("uid", user_id)]).send().await?;
@@ -410,8 +410,7 @@ pub async fn get_room_id(user_id: u64) -> Result<u64> {
         "Fetched room ID: {}",
         json.data.as_ref().map(|d| d.room_id).unwrap_or(0)
     );
-    let data = json.into_data()?;
-    Ok(data.room_id)
+    json.into_data()
 }
 
 #[cfg(test)]
@@ -430,6 +429,143 @@ fn deserialize_room_id() {
     assert_eq!(response.message, "ok");
     let data = response.into_data().unwrap();
     assert_eq!(data.room_id, 123456);
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct RoomInfo {
+    pub title: String,
+    pub area_id: u64,
+    pub parent_area_id: u64,
+}
+
+pub async fn get_room_info(room_id: u64) -> Result<RoomInfo> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/get_info";
+    let client = client();
+    let response = client
+        .get(URL)
+        .query(&[("room_id", room_id)])
+        .send()
+        .await?;
+    let json: Response<RoomInfo> = response.json().await?;
+    tracing::info!(
+        "Fetched room info for room_id {}: title='{}', area_id={}, parent_area_id={}",
+        room_id,
+        json.data
+            .as_ref()
+            .map(|d| d.title.as_str())
+            .unwrap_or("N/A"),
+        json.data.as_ref().map(|d| d.area_id).unwrap_or(0),
+        json.data.as_ref().map(|d| d.parent_area_id).unwrap_or(0)
+    );
+    json.into_data()
+}
+
+#[cfg(test)]
+#[test]
+fn deserialize_room_info() {
+    let json_str = r#"{
+        "code": 0,
+        "msg": "ok",
+        "message": "ok",
+        "data": {
+            "uid": 9617619,
+            "room_id": 5440,
+            "short_id": 1,
+            "attention": 11919499,
+            "online": 0,
+            "is_portrait": false,
+            "description": "欢迎加入bilibili《快乐运动研究社》，和B站UP主们一起探讨有关运动的经历感受，解决身体和情绪的“疑难杂症”，寻找适合自己的运动，一起跟练！本期我们一起探讨：运动健身能缓解社交恐惧吗？",
+            "live_status": 2,
+            "area_id": 145,
+            "parent_area_id": 1,
+            "parent_area_name": "娱乐",
+            "old_area_id": 6,
+            "background": "",
+            "title": "快乐运动研究社",
+            "user_cover": "https://i0.hdslb.com/bfs/live/new_room_cover/96943b8d106a777a34cf796421bb4254163b30e1.jpg",
+            "keyframe": "https://i0.hdslb.com/bfs/live-key-frame/keyframe08121926000000005440np0q7a.jpg",
+            "is_strict_room": false,
+            "live_time": "0000-00-00 00:00:00",
+            "tags": "",
+            "is_anchor": 0,
+            "room_silent_type": "",
+            "room_silent_level": 1,
+            "room_silent_second": 0,
+            "area_name": "视频聊天",
+            "pendants": "",
+            "area_pendants": "",
+            "hot_words": [
+                "2333333",
+                "喂，妖妖零吗",
+                "红红火火恍恍惚惚",
+                "FFFFFFFFFF",
+                "Yooooooo",
+                "啪啪啪啪啪",
+                "666666666",
+                "老司机带带我",
+                "你为什么这么熟练啊",
+                "gg",
+                "prprpr",
+                "向大佬低头",
+                "请大家注意弹幕礼仪哦！",
+                "还有这种操作！",
+                "囍",
+                "打call",
+                "你气不气？",
+                "队友呢？"
+            ],
+            "hot_words_status": 0,
+            "verify": "",
+            "new_pendants": {
+                "frame": {
+                    "name": "",
+                    "value": "",
+                    "position": 0,
+                    "desc": "",
+                    "area": 0,
+                    "area_old": 0,
+                    "bg_color": "",
+                    "bg_pic": "",
+                    "use_old_area": false
+                },
+                "badge": {
+                    "name": "v_company",
+                    "position": 3,
+                    "value": "",
+                    "desc": "哔哩哔哩直播官方账号"
+                },
+                "mobile_frame": {
+                    "name": "",
+                    "value": "",
+                    "position": 0,
+                    "desc": "",
+                    "area": 0,
+                    "area_old": 0,
+                    "bg_color": "",
+                    "bg_pic": "",
+                    "use_old_area": false
+                },
+                "mobile_badge": null
+            },
+            "up_session": "",
+            "pk_status": 0,
+            "pk_id": 0,
+            "battle_id": 0,
+            "allow_change_area_time": 0,
+            "allow_upload_cover_time": 0,
+            "studio_info": {
+            "status": 0,
+            "master_list": []
+            }
+        }
+    }"#;
+    let response: Response<RoomInfo> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 0);
+    assert_eq!(response.message, "ok");
+    let data = response.into_data().unwrap();
+    assert_eq!(data.title, "快乐运动研究社");
+    assert_eq!(data.area_id, 145);
+    assert_eq!(data.parent_area_id, 1);
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
