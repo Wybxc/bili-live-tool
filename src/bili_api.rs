@@ -59,6 +59,9 @@ impl<T> Response<T> {
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
+pub struct NoneData {}
+
+#[derive(serde::Deserialize, Default, Debug)]
 #[serde(default)]
 pub struct GeneratePassportQrcode {
     pub url: SmolStr,
@@ -681,13 +684,14 @@ pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
         ])
         .send()
         .await?;
-    let json: Response<()> = response.json().await?;
+    let json: Response<NoneData> = response.json().await?;
     tracing::info!(
         "Updated live stream title to '{}' for room_id {}",
         title,
         room_id
     );
-    json.into_data()
+    json.into_data()?;
+    Ok(())
 }
 
 pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
@@ -705,13 +709,14 @@ pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
         .send()
         .await
         .unwrap();
-    let json: Response<()> = response.json().await?;
+    let json: Response<NoneData> = response.json().await?;
     tracing::info!(
         "Updated live stream area to '{}' for room_id {}",
         area_id,
         room_id
     );
-    json.into_data()
+    json.into_data()?;
+    Ok(())
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
@@ -950,14 +955,15 @@ pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
         ])
         .send()
         .await?;
-    let json: Response<()> = response.json().await?;
+    let json: Response<NoneData> = response.json().await?;
     tracing::info!(
         "Stopped live stream for room_id {}: code {}, message {}",
         room_id,
         json.code,
         json.message
     );
-    json.into_data()
+    json.into_data()?;
+    Ok(())
 }
 
 pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_json::Value)> {

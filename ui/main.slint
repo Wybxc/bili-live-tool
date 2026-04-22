@@ -15,29 +15,28 @@ enum LoginStatus {
     Success,
 }
 
-export global LoginLogic {
-    in-out property <image> qr-code;
-    in-out property <LoginStatus> login-status: LoginStatus.Waiting;
-    in-out property <string> oauth-key;
-    in-out property <bool> qr-code-ready: false;
-    callback refresh-qr-code();
-    callback logout();
-}
-
 enum RoomIdStatus {
     Fetching,
     Ok,
     Failed,
 }
 
-export global UserLogic {
+export global Logic {
+    // Login
+    in-out property <image> qr-code;
+    in-out property <LoginStatus> login-status: LoginStatus.Waiting;
+    in-out property <string> oauth-key;
+    in-out property <bool> qr-code-ready: false;
+    callback refresh-qr-code();
+    callback logout();
+
+    // User
     in-out property <image> face;
     in-out property <string> uname;
     in-out property <string> room-id;
     in-out property <RoomIdStatus> room-id-status: RoomIdStatus.Fetching;
-}
 
-export global LiveLogic {
+    // Live
     in-out property <string> title;
     in-out property <[string]> area-list;
     in-out property <string> selected-area;
@@ -51,23 +50,23 @@ export global LiveLogic {
 component LoginPage {
     VerticalBox {
         Text {
-            text: LoginLogic.login-status == LoginStatus.Waiting ? "请使用B站APP扫码登录" :      //
-                   LoginLogic.login-status == LoginStatus.Confirming ? "请在手机上确认登录" :     //
-                   LoginLogic.login-status == LoginStatus.Expired ? "二维码已过期，请刷新" :       //
-                   LoginLogic.login-status == LoginStatus.Success ? "登录成功！" : "未知状态";    //
+            text: Logic.login-status == LoginStatus.Waiting ? "请使用B站APP扫码登录" :      //
+                   Logic.login-status == LoginStatus.Confirming ? "请在手机上确认登录" :     //
+                   Logic.login-status == LoginStatus.Expired ? "二维码已过期，请刷新" :       //
+                   Logic.login-status == LoginStatus.Success ? "登录成功！" : "未知状态";    //
             horizontal-alignment: center;
         }
 
-        if LoginLogic.qr-code-ready:
+        if Logic.qr-code-ready:
         Image {
             width: 300px;
             height: 300px;
-            source: LoginLogic.qr-code;
+            source: Logic.qr-code;
             image-fit: contain;
             image-rendering: pixelated;
         }
 
-        if !LoginLogic.qr-code-ready:
+        if !Logic.qr-code-ready:
         Rectangle {
             width: 300px;
             height: 300px;
@@ -81,7 +80,7 @@ component LoginPage {
 
         Button {
             text: "刷新二维码";
-            clicked => LoginLogic.refresh-qr-code();
+            clicked => Logic.refresh-qr-code();
         }
     }
 }
@@ -97,27 +96,27 @@ component MainPage {
                 Image {
                     width: parent.width;
                     height: parent.height;
-                    source: UserLogic.face;
+                    source: Logic.face;
                 }
             }
 
             Text {
-                text: UserLogic.uname;
+                text: Logic.uname;
                 font-size: 15px;
                 vertical-alignment: center;
             }
 
             Button {
                 text: "退出登录";
-                clicked => LoginLogic.logout();
+                clicked => Logic.logout();
             }
         }
 
         VerticalBox {
             Text {
-                text: "房间号: " + (UserLogic.room-id-status == RoomIdStatus.Fetching ? "获取中..." :  //
-                       UserLogic.room-id-status == RoomIdStatus.Ok ? UserLogic.room-id :  //
-                       UserLogic.room-id-status == RoomIdStatus.Failed ? "获取失败" : "未知状态");    //
+                text: "房间号: " + (Logic.room-id-status == RoomIdStatus.Fetching ? "获取中..." :  //
+                       Logic.room-id-status == RoomIdStatus.Ok ? Logic.room-id :  //
+                       Logic.room-id-status == RoomIdStatus.Failed ? "获取失败" : "未知状态");    //
             }
 
             HorizontalBox {
@@ -129,13 +128,13 @@ component MainPage {
                 }
 
                 LineEdit {
-                    text <=> LiveLogic.title;
+                    text <=> Logic.title;
                     placeholder-text: "请输入直播标题";
                 }
 
                 Button {
                     text: "更新";
-                    clicked => LiveLogic.update-live-title();
+                    clicked => Logic.update-live-title();
                 }
             }
 
@@ -148,19 +147,19 @@ component MainPage {
                 }
 
                 ComboBox {
-                    model: LiveLogic.area-list;
-                    current-value <=> LiveLogic.selected-area;
-                    selected => LiveLogic.update-sub-area-list();
+                    model: Logic.area-list;
+                    current-value <=> Logic.selected-area;
+                    selected => Logic.update-sub-area-list();
                 }
 
                 ComboBox {
-                    model: LiveLogic.sub-area-list;
-                    current-value <=> LiveLogic.selected-sub-area;
+                    model: Logic.sub-area-list;
+                    current-value <=> Logic.selected-sub-area;
                 }
 
                 Button {
                     text: "更新";
-                    clicked => LiveLogic.update-live-area();
+                    clicked => Logic.update-live-area();
                 }
             }
 
@@ -175,6 +174,6 @@ component MainPage {
 export component MainWindow inherits Window {
     title: "Bili Live Tool";
 
-    if LoginLogic.login-status != LoginStatus.Success: LoginPage { }
-    if LoginLogic.login-status == LoginStatus.Success: MainPage { }
+    if Logic.login-status != LoginStatus.Success: LoginPage { }
+    if Logic.login-status == LoginStatus.Success: MainPage { }
 }

@@ -43,88 +43,94 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn init(window: &MainWindow) {
-    let login = window.global::<LoginLogic>();
-    let user = window.global::<UserLogic>();
-    let live = window.global::<LiveLogic>();
+    let logic = window.global::<Logic>();
 
-    login.on_refresh_qr_code({
-        let login = login.as_weak();
+    logic.on_refresh_qr_code({
+        let logic = logic.as_weak();
         move || {
-            spawn(refresh_qr_code(login.clone()));
+            spawn(refresh_qr_code(logic.clone()));
         }
     });
 
-    login.on_logout({
-        let login = login.as_weak();
-        let user = user.as_weak();
-        let live = live.as_weak();
+    logic.on_logout({
+        let logic = logic.as_weak();
         move || {
-            spawn(logout(login.clone()));
-            start_login_session(login.clone(), user.clone(), live.clone());
+            spawn(logout(logic.clone()));
+            start_login_session(logic.clone());
         }
     });
 
-    live.on_update_sub_area_list({
-        let live = live.as_weak();
+    logic.on_update_sub_area_list({
+        let logic = logic.as_weak();
         move || {
-            spawn(update_sub_area_list(live.clone()));
+            spawn(update_sub_area_list(logic.clone()));
+        }
+    });
+
+    logic.on_update_live_area({
+        let logic = logic.as_weak();
+        move || {
+            spawn(update_live_area(logic.clone()));
+        }
+    });
+
+    logic.on_update_live_title({
+        let logic = logic.as_weak();
+        move || {
+            spawn(update_live_title(logic.clone()));
         }
     });
 
     spawn({
-        let login = login.as_weak();
-        let user = user.as_weak();
-        let live = live.as_weak();
+        let logic = logic.as_weak();
         async move {
-            // If already logged in, skip the QR code login process.
-            if init_user(user.clone(), live.clone()).await {
-                login.unwrap().set_login_status(LoginStatus::Success);
+            // If already logged in, skip the QR code logic process.
+            if init_user(logic.clone()).await {
+                logic.unwrap().set_login_status(LoginStatus::Success);
                 return;
             }
 
-            // Not logged in, initialize the QR code login process.
-            start_login_session(login, user, live);
+            // Not logged in, initialize the QR code logic process.
+            start_login_session(logic);
         }
     });
 
     spawn({
-        let live = live.as_weak();
+        let logic = logic.as_weak();
         async move {
-            init_live_area_list(live.clone()).await;
-            update_sub_area_list(live.clone()).await;
+            init_live_area_list(logic.clone()).await;
+            update_sub_area_list(logic.clone()).await;
         }
     });
 }
 
-async fn init_user(user: Weak<UserLogic<'static>>, live: Weak<LiveLogic<'static>>) -> bool {
+async fn init_user(logic: Weak<Logic<'static>>) -> bool {
     if let Ok(info) = bili_api::get_nav_user_info().await {
         if info.is_login {
-            user.unwrap().set_uname(info.uname.as_str().into());
+            logic.unwrap().set_uname(info.uname.as_str().into());
 
-            user.unwrap().set_room_id_status(RoomIdStatus::Fetching);
+            logic.unwrap().set_room_id_status(RoomIdStatus::Fetching);
             spawn({
-                let user = user.clone();
+                let logic = logic.clone();
                 async move {
                     if let Ok(room_id) = bili_api::get_room_id(info.mid).await {
-                        let user = user.unwrap();
-                        user.set_room_id(room_id.room_id.to_string().into());
-                        user.set_room_id_status(RoomIdStatus::Ok);
+                        let logic = logic.unwrap();
+                        logic.set_room_id(room_id.room_id.to_string().into());
+                        logic.set_room_id_status(RoomIdStatus::Ok);
                     } else {
-                        user.unwrap().set_room_id_status(RoomIdStatus::Failed);
+                        logic.unwrap().set_room_id_status(RoomIdStatus::Failed);
                     }
 
-                    init_room_info(user.clone(), live)
-                        .await
-                        .unwrap_or_else(|e| {
-                            tracing::error!("Failed to initialize room info: {}", e);
-                        });
+                    init_room_info(logic.clone()).await.unwrap_or_else(|e| {
+                        tracing::error!("Failed to initialize room info: {}", e);
+                    });
                 }
             });
 
             spawn(async move {
-                let user = user.unwrap();
+                let logic = logic.unwrap();
                 if let Ok(face) = download_image(info.face.as_str()).await {
-                    user.set_face(face);
+                    logic.set_face(face);
                 }
             });
 
@@ -134,13 +140,10 @@ async fn init_user(user: Weak<UserLogic<'static>>, live: Weak<LiveLogic<'static>
     false
 }
 
-async fn init_room_info(
-    user: Weak<UserLogic<'static>>,
-    live: Weak<LiveLogic<'static>>,
-) -> anyhow::Result<()> {
-    let room_id = user.unwrap().get_room_id().parse::<u64>()?;
+async fn init_room_info(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
+    let room_id = logic.unwrap().get_room_id().parse::<u64>()?;
     let room_info = bili_api::get_room_info(room_id).await?;
-    live.unwrap().set_title(room_info.title.as_str().into());
+    logic.unwrap().set_title(room_info.title.as_str().into());
 
     if let Some(area_list) = live_area_list().await {
         let area = area_list
@@ -158,18 +161,18 @@ async fn init_room_info(
             sub_area.name.as_str()
         );
 
-        let live = live.unwrap();
-        live.set_selected_area(area.name.as_str().into());
+        let logic = logic.unwrap();
+        logic.set_selected_area(area.name.as_str().into());
         // sub area list is updated automatically by the area selection change callback
-        live.set_selected_sub_area(sub_area.name.as_str().into());
+        logic.set_selected_sub_area(sub_area.name.as_str().into());
     }
 
     Ok(())
 }
 
-/// Refresh the QR code and update the login state to Polling. If already logged in, do nothing.
-async fn refresh_qr_code(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()> {
-    login.unwrap().set_qr_code_ready(false);
+/// Refresh the QR code and update the logic state to Polling. If already logged in, do nothing.
+async fn refresh_qr_code(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
+    logic.unwrap().set_qr_code_ready(false);
 
     let response = bili_api::generate_passport_qrcode().await?;
     let qrcode = QrCode::new(response.url.as_str())?;
@@ -180,46 +183,38 @@ async fn refresh_qr_code(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()>
         qrcode.height(),
     );
 
-    let login = login.unwrap();
-    login.set_qr_code(Image::from_rgb8(buffer));
-    login.set_login_status(LoginStatus::Waiting);
-    login.set_oauth_key(response.qrcode_key.as_str().into());
-    login.set_qr_code_ready(true);
+    let logic = logic.unwrap();
+    logic.set_qr_code(Image::from_rgb8(buffer));
+    logic.set_login_status(LoginStatus::Waiting);
+    logic.set_oauth_key(response.qrcode_key.as_str().into());
+    logic.set_qr_code_ready(true);
 
     Ok(())
 }
 
-fn start_login_session(
-    login: Weak<LoginLogic<'static>>,
-    user: Weak<UserLogic<'static>>,
-    live: Weak<LiveLogic<'static>>,
-) {
+fn start_login_session(logic: Weak<Logic<'static>>) {
     static LOGIN_SESSION_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
     let mut handle_lock = LOGIN_SESSION_HANDLE.lock().unwrap();
 
-    // Abort the previous login session if it exists.
+    // Abort the previous logic session if it exists.
     if let Some(handle) = handle_lock.take() {
         handle.abort();
     }
 
-    // Start a new login session.
+    // Start a new logic session.
     let handle = spawn(async move {
-        let _ = refresh_qr_code(login.clone()).await;
-        let _ = login_session(login, user, live).await;
+        let _ = refresh_qr_code(logic.clone()).await;
+        let _ = login_session(logic).await;
     });
     *handle_lock = Some(handle);
 }
 
-async fn login_session(
-    login: Weak<LoginLogic<'static>>,
-    user: Weak<UserLogic<'static>>,
-    live: Weak<LiveLogic<'static>>,
-) -> anyhow::Result<()> {
+async fn login_session(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
     loop {
         tokio::time::sleep(Duration::from_millis(1500)).await;
-        let key = match login.unwrap().get_login_status() {
+        let key = match logic.unwrap().get_login_status() {
             LoginStatus::Waiting | LoginStatus::Confirming | LoginStatus::Expired => {
-                login.unwrap().get_oauth_key()
+                logic.unwrap().get_oauth_key()
             }
             LoginStatus::Success => break,
         };
@@ -228,20 +223,20 @@ async fn login_session(
         };
         match status.code {
             bili_api::PollPassportQrcodeStatusCode::Success => {
-                init_user(user, live).await;
-                login.unwrap().set_login_status(LoginStatus::Success);
+                init_user(logic.clone()).await;
+                logic.unwrap().set_login_status(LoginStatus::Success);
                 bili_api::save_cookies();
                 tracing::info!("Login success");
                 break;
             }
             bili_api::PollPassportQrcodeStatusCode::Expired => {
-                login.unwrap().set_login_status(LoginStatus::Expired);
+                logic.unwrap().set_login_status(LoginStatus::Expired);
             }
             bili_api::PollPassportQrcodeStatusCode::Confirming => {
-                login.unwrap().set_login_status(LoginStatus::Confirming);
+                logic.unwrap().set_login_status(LoginStatus::Confirming);
             }
             bili_api::PollPassportQrcodeStatusCode::Waiting => {
-                login.unwrap().set_login_status(LoginStatus::Waiting);
+                logic.unwrap().set_login_status(LoginStatus::Waiting);
             }
             bili_api::PollPassportQrcodeStatusCode::Unknown => {}
         }
@@ -249,9 +244,9 @@ async fn login_session(
     Ok(())
 }
 
-async fn logout(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()> {
+async fn logout(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
     bili_api::clear_cookies();
-    login.unwrap().set_login_status(LoginStatus::Waiting);
+    logic.unwrap().set_login_status(LoginStatus::Waiting);
     Ok(())
 }
 
@@ -264,21 +259,21 @@ async fn live_area_list() -> Option<Arc<Vec<Area>>> {
         .cloned()
 }
 
-async fn init_live_area_list(live: Weak<LiveLogic<'static>>) {
+async fn init_live_area_list(logic: Weak<Logic<'static>>) {
     let Some(area_list) = live_area_list().await else {
         return;
     };
 
-    live.unwrap().set_area_list(collect(
+    logic.unwrap().set_area_list(collect(
         area_list.iter().map(|area| area.name.as_str().into()),
     ));
 }
 
-async fn update_sub_area_list(live: Weak<LiveLogic<'static>>) {
+async fn update_sub_area_list(logic: Weak<Logic<'static>>) {
     let Some(area_list) = live_area_list().await else {
         return;
     };
-    let selected_area_name = live.unwrap().get_selected_area();
+    let selected_area_name = logic.unwrap().get_selected_area();
     let Some(area) = area_list
         .iter()
         .find(|area| area.name.as_str() == selected_area_name.as_str())
@@ -288,11 +283,31 @@ async fn update_sub_area_list(live: Weak<LiveLogic<'static>>) {
         return;
     };
 
-    live.unwrap().set_sub_area_list(collect(
+    logic.unwrap().set_sub_area_list(collect(
         area.list
             .iter()
             .map(|sub_area| sub_area.name.as_str().into()),
     ));
+}
+
+async fn update_live_area(logic: Weak<Logic<'static>>) {
+    todo!()
+}
+
+async fn update_live_title(logic: Weak<Logic<'static>>) {
+    let title = logic.unwrap().get_title();
+    let room_id = logic.unwrap().get_room_id();
+    let Ok(room_id) = room_id.parse::<u64>() else {
+        tracing::error!("Invalid room id: {room_id}");
+        return;
+    };
+    let Some(csrf) = bili_api::get_csrf_token() else {
+        tracing::error!("Failed to get CSRF token");
+        return;
+    };
+    if let Err(e) = bili_api::update_title(room_id, &title, &csrf).await {
+        tracing::error!("Failed to update live title: {}", e);
+    }
 }
 
 fn spawn<F: std::future::Future + 'static>(f: F) -> JoinHandle<F::Output> {
