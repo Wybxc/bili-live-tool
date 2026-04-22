@@ -180,10 +180,7 @@ async fn update_sub_area_list(live: Weak<LiveLogic<'static>>) {
         .find(|area| area.name.as_str() == selected_area_name.as_str())
         .or(area_list.first())
     else {
-        tracing::warn!(
-            "Selected area '{}' not found in area list",
-            selected_area_name
-        );
+        tracing::warn!("Area list is empty");
         return;
     };
 

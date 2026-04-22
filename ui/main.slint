@@ -34,6 +34,7 @@ export global LiveLogic {
     in-out property <[string]> sub-area-list;
     in-out property <string> selected-sub-area;
     callback update-sub-area-list();
+    callback sync-live-area();
 }
 
 component LoginPage {
@@ -115,14 +116,17 @@ component MainPage {
                 ComboBox {
                     model: LiveLogic.area-list;
                     current-value <=> LiveLogic.selected-area;
-                    selected(_) => {
-                        LiveLogic.update-sub-area-list();
-                    }
+                    selected => LiveLogic.update-sub-area-list();
                 }
 
                 ComboBox {
                     model: LiveLogic.sub-area-list;
                     current-value <=> LiveLogic.selected-sub-area;
+                }
+
+                Button {
+                    text: "同步";
+                    clicked => LiveLogic.sync-live-area();
                 }
             }
 
