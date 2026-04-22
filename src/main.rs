@@ -96,13 +96,29 @@ fn init(window: &MainWindow) {
 async fn init_user(user: Weak<UserLogic<'static>>) -> bool {
     if let Ok(info) = bili_api::get_nav_user_info().await {
         if info.is_login {
-            let user = user.unwrap();
-            user.set_uname(info.uname.as_str().into());
+            user.unwrap().set_uname(info.uname.as_str().into());
+
+            user.unwrap().set_room_id_status(RoomIdStatus::Fetching);
+            spawn({
+                let user = user.clone();
+                async move {
+                    let user = user.unwrap();
+                    if let Ok(room_id) = bili_api::get_room_id(info.mid).await {
+                        user.set_room_id(room_id.to_string().into());
+                        user.set_room_id_status(RoomIdStatus::Ok);
+                    } else {
+                        user.set_room_id_status(RoomIdStatus::Failed);
+                    }
+                }
+            });
+
             spawn(async move {
+                let user = user.unwrap();
                 if let Ok(face) = download_image(info.face.as_str()).await {
                     user.set_face(face);
                 }
             });
+
             return true;
         }
     }

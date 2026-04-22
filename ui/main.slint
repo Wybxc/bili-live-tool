@@ -24,10 +24,17 @@ export global LoginLogic {
     callback logout();
 }
 
+enum RoomIdStatus {
+    Fetching,
+    Ok,
+    Failed,
+}
+
 export global UserLogic {
     in-out property <image> face;
     in-out property <string> uname;
-    in-out property <int> room-id;
+    in-out property <string> room-id;
+    in-out property <RoomIdStatus> room-id-status: RoomIdStatus.Fetching;
 }
 
 export global LiveLogic {
@@ -108,7 +115,9 @@ component MainPage {
 
         VerticalBox {
             Text {
-                text: "房间号: " + UserLogic.room-id;
+                text: "房间号: " + (UserLogic.room-id-status == RoomIdStatus.Fetching ? "获取中..." :  //
+                       UserLogic.room-id-status == RoomIdStatus.Ok ? UserLogic.room-id :  //
+                       UserLogic.room-id-status == RoomIdStatus.Failed ? "获取失败" : "未知状态");    //
             }
 
             HorizontalBox {
@@ -156,6 +165,7 @@ component MainPage {
 
             Button {
                 text: "开始直播";
+                primary: true;
             }
         }
     }

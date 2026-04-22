@@ -237,6 +237,7 @@ pub struct NavUserInfo {
     pub is_login: bool,
     pub face: SmolStr,
     pub uname: SmolStr,
+    pub mid: u64,
 }
 
 pub async fn get_nav_user_info() -> Result<NavUserInfo> {
@@ -396,6 +397,42 @@ fn deserialize_nav_user_info() {
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
+pub struct RoomId {
+    room_id: u64,
+}
+
+pub async fn get_room_id(user_id: u64) -> Result<u64> {
+    const URL: &str = "https://api.live.bilibili.com/room/v2/Room/room_id_by_uid";
+    let client = client();
+    let response = client.get(URL).query(&[("uid", user_id)]).send().await?;
+    let json: Response<RoomId> = response.json().await?;
+    tracing::info!(
+        "Fetched room ID: {}",
+        json.data.as_ref().map(|d| d.room_id).unwrap_or(0)
+    );
+    let data = json.into_data()?;
+    Ok(data.room_id)
+}
+
+#[cfg(test)]
+#[test]
+fn deserialize_room_id() {
+    let json_str = r#"{
+        "code": 0,
+        "msg": "ok",
+        "message": "ok",
+        "data": {
+            "room_id": 123456
+        }
+    }"#;
+    let response: Response<RoomId> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 0);
+    assert_eq!(response.message, "ok");
+    let data = response.into_data().unwrap();
+    assert_eq!(data.room_id, 123456);
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
 pub struct Area {
     pub id: u64,
     pub name: SmolStr,
@@ -494,6 +531,53 @@ fn deserialize_area_list() {
     assert_eq!(area.list[2].name, "绝地求生");
 }
 
+pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
+    let client = client();
+    let response = client
+        .post(URL)
+        .form(&[
+            ("room_id", room_id.to_string().as_str()),
+            ("platform", "pc_link"),
+            ("title", title),
+            ("csrf_token", csrf),
+            ("csrf", csrf),
+        ])
+        .send()
+        .await?;
+    let json: Response<()> = response.json().await?;
+    tracing::info!(
+        "Updated live stream title to '{}' for room_id {}",
+        title,
+        room_id
+    );
+    json.into_data()
+}
+
+pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
+    let client = client();
+    let response = client
+        .post(URL)
+        .form(&[
+            ("room_id", room_id.to_string().as_str()),
+            ("area_id", area_id.to_string().as_str()),
+            ("platform", "pc_link"),
+            ("csrf_token", csrf),
+            ("csrf", csrf),
+        ])
+        .send()
+        .await
+        .unwrap();
+    let json: Response<()> = response.json().await?;
+    tracing::info!(
+        "Updated live stream area to '{}' for room_id {}",
+        area_id,
+        room_id
+    );
+    json.into_data()
+}
+
 #[derive(serde::Deserialize, Default, Debug)]
 pub struct Timpstamp {
     pub now: u64,
@@ -584,53 +668,6 @@ fn deserialize_live_version() {
     let data = response.into_data().unwrap();
     assert_eq!(data.curr_version, "7.19.0.9432");
     assert_eq!(data.build, 9432);
-}
-
-pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
-    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
-    let client = client();
-    let response = client
-        .post(URL)
-        .form(&[
-            ("room_id", room_id.to_string().as_str()),
-            ("platform", "pc_link"),
-            ("title", title),
-            ("csrf_token", csrf),
-            ("csrf", csrf),
-        ])
-        .send()
-        .await?;
-    let json: Response<()> = response.json().await?;
-    tracing::info!(
-        "Updated live stream title to '{}' for room_id {}",
-        title,
-        room_id
-    );
-    json.into_data()
-}
-
-pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
-    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
-    let client = client();
-    let response = client
-        .post(URL)
-        .form(&[
-            ("room_id", room_id.to_string().as_str()),
-            ("area_id", area_id.to_string().as_str()),
-            ("platform", "pc_link"),
-            ("csrf_token", csrf),
-            ("csrf", csrf),
-        ])
-        .send()
-        .await
-        .unwrap();
-    let json: Response<()> = response.json().await?;
-    tracing::info!(
-        "Updated live stream area to '{}' for room_id {}",
-        area_id,
-        room_id
-    );
-    json.into_data()
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
