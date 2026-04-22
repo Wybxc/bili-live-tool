@@ -618,6 +618,28 @@ fn deserialize_start_live_response() {
     );
 }
 
+pub async fn stop_live(room_id: u64, csrf: SmolStr) -> Result<()> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/stopLive";
+    let client = client();
+    let response = client
+        .post(URL)
+        .form::<[(&str, serde_json::Value)]>(&[
+            ("platform", "pc_link".into()),
+            ("room_id", room_id.into()),
+            ("csrf", csrf.to_string().into()),
+        ])
+        .send()
+        .await?;
+    let json: Response<()> = response.json().await?;
+    tracing::info!(
+        "Stopped live stream for room_id {}: code {}, message {}",
+        room_id,
+        json.code,
+        json.message
+    );
+    json.into_data()
+}
+
 pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_json::Value)> {
     // B站直播姬 App Key
     const APP_KEY: &str = "aae92bc66f3edfab";
