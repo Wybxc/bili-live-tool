@@ -1,11 +1,15 @@
 // Prevent console window in addition to Slint window in Windows release builds when, e.g., starting the app via file manager. Ignored on other platforms.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{rc::Rc, sync::Arc, time::Duration};
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use image::Rgb;
 use qrcode::QrCode;
-use slint::{Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, VecModel, Weak};
+use slint::{Image, JoinHandle, ModelRc, Rgb8Pixel, SharedPixelBuffer, VecModel, Weak};
 
 use crate::bili_api::Area;
 
@@ -44,7 +48,9 @@ fn init(window: &MainWindow) {
 
     login.on_refresh_qr_code({
         let login = login.as_weak();
-        move || spawn(refresh_qr_code(login.clone()))
+        move || {
+            spawn(refresh_qr_code(login.clone()));
+        }
     });
 
     login.on_logout({
@@ -52,13 +58,15 @@ fn init(window: &MainWindow) {
         let user = user.as_weak();
         move || {
             spawn(logout(login.clone()));
-            spawn(poll_login_status(login.clone(), user.clone()));
+            start_login_session(login.clone(), user.clone());
         }
     });
 
     live.on_update_sub_area_list({
         let live = live.as_weak();
-        move || spawn(update_sub_area_list(live.clone()))
+        move || {
+            spawn(update_sub_area_list(live.clone()));
+        }
     });
 
     spawn({
@@ -72,8 +80,7 @@ fn init(window: &MainWindow) {
             }
 
             // Not logged in, initialize the QR code login process.
-            refresh_qr_code(login.clone()).await.unwrap();
-            poll_login_status(login, user).await.unwrap();
+            start_login_session(login, user);
         }
     });
 
@@ -83,7 +90,7 @@ fn init(window: &MainWindow) {
             init_live_area_list(live.clone()).await;
             update_sub_area_list(live.clone()).await;
         }
-    })
+    });
 }
 
 async fn init_user(user: Weak<UserLogic<'static>>) -> bool {
@@ -104,6 +111,8 @@ async fn init_user(user: Weak<UserLogic<'static>>) -> bool {
 
 /// Refresh the QR code and update the login state to Polling. If already logged in, do nothing.
 async fn refresh_qr_code(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()> {
+    login.unwrap().set_qr_code_ready(false);
+
     let response = bili_api::generate_passport_qrcode().await?;
     let qrcode = QrCode::new(response.url.as_str())?;
     let qrcode = qrcode.render::<Rgb<u8>>().build();
@@ -122,7 +131,24 @@ async fn refresh_qr_code(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()>
     Ok(())
 }
 
-async fn poll_login_status(
+fn start_login_session(login: Weak<LoginLogic<'static>>, user: Weak<UserLogic<'static>>) {
+    static LOGIN_SESSION_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+    let mut handle_lock = LOGIN_SESSION_HANDLE.lock().unwrap();
+
+    // Abort the previous login session if it exists.
+    if let Some(handle) = handle_lock.take() {
+        handle.abort();
+    }
+
+    // Start a new login session.
+    let handle = spawn(async move {
+        let _ = refresh_qr_code(login.clone()).await;
+        let _ = login_session(login, user).await;
+    });
+    *handle_lock = Some(handle);
+}
+
+async fn login_session(
     login: Weak<LoginLogic<'static>>,
     user: Weak<UserLogic<'static>>,
 ) -> anyhow::Result<()> {
@@ -162,9 +188,7 @@ async fn poll_login_status(
 
 async fn logout(login: Weak<LoginLogic<'static>>) -> anyhow::Result<()> {
     bili_api::clear_cookies();
-    login.unwrap().set_qr_code_ready(false);
     login.unwrap().set_login_status(LoginStatus::Waiting);
-    refresh_qr_code(login).await?;
     Ok(())
 }
 
@@ -214,8 +238,8 @@ async fn update_sub_area_list(live: Weak<LiveLogic<'static>>) {
     ));
 }
 
-fn spawn<F: std::future::Future + 'static>(f: F) {
-    slint::spawn_local(async_compat::Compat::new(f)).unwrap();
+fn spawn<F: std::future::Future + 'static>(f: F) -> JoinHandle<F::Output> {
+    slint::spawn_local(async_compat::Compat::new(f)).unwrap()
 }
 
 fn collect<T: Clone + 'static>(iter: impl Iterator<Item = T>) -> ModelRc<T> {

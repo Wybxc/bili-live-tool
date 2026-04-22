@@ -71,10 +71,7 @@ component LoginPage {
 
         Button {
             text: "刷新二维码";
-            clicked => {
-                LoginLogic.qr-code-ready = false;
-                LoginLogic.refresh-qr-code()
-            }
+            clicked => LoginLogic.refresh-qr-code();
         }
     }
 }
