@@ -168,6 +168,12 @@ async fn init_live_area_list(live: Weak<LiveLogic<'static>>) {
     live.unwrap().set_area_list(collect(
         area_list.iter().map(|area| area.name.as_str().into()),
     ));
+    live.unwrap().set_selected_area(
+        area_list
+            .first()
+            .map(|area| area.name.as_str().into())
+            .unwrap_or_default(),
+    );
 }
 
 async fn update_sub_area_list(live: Weak<LiveLogic<'static>>) {
