@@ -43,9 +43,9 @@ export global Logic {
 
     // Live
     in-out property <string> title;
-    in-out property <[string]> area-list;
+    in-out property <[string]> area-list: [];
     in-out property <string> selected-area;
-    in-out property <[string]> sub-area-list;
+    in-out property <[string]> sub-area-list: [];
     in-out property <string> selected-sub-area;
     callback update-sub-area-list();
     callback update-live-area();

@@ -2,7 +2,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    rc::Rc,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -183,10 +182,14 @@ async fn init_room_info(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
 
         let logic = logic.unwrap();
         logic.set_selected_area(area.name.as_str().into());
-        // sub area list is updated automatically by the area selection change callback
+        set_array(
+            &logic.get_sub_area_list(),
+            area.list
+                .iter()
+                .map(|sub_area| sub_area.name.as_str().into()),
+        );
         logic.set_selected_sub_area(sub_area.name.as_str().into());
     }
-
     Ok(())
 }
 
@@ -284,9 +287,10 @@ async fn init_live_area_list(logic: Weak<Logic<'static>>) {
         return;
     };
 
-    logic.unwrap().set_area_list(collect(
+    set_array(
+        &logic.unwrap().get_area_list(),
         area_list.iter().map(|area| area.name.as_str().into()),
-    ));
+    );
 }
 
 async fn update_sub_area_list(logic: Weak<Logic<'static>>) {
@@ -303,11 +307,12 @@ async fn update_sub_area_list(logic: Weak<Logic<'static>>) {
         return;
     };
 
-    logic.unwrap().set_sub_area_list(collect(
+    set_array(
+        &logic.unwrap().get_sub_area_list(),
         area.list
             .iter()
             .map(|sub_area| sub_area.name.as_str().into()),
-    ));
+    );
 }
 
 async fn update_live_area(logic: Weak<Logic<'static>>) {
@@ -375,9 +380,9 @@ fn spawn<F: std::future::Future + 'static>(f: F) -> JoinHandle<F::Output> {
     slint::spawn_local(async_compat::Compat::new(f)).unwrap()
 }
 
-fn collect<T: Clone + 'static>(iter: impl Iterator<Item = T>) -> ModelRc<T> {
-    let model = VecModel::from_iter(iter);
-    Rc::new(model).into()
+fn set_array<T: Clone + 'static>(model: &ModelRc<T>, iter: impl Iterator<Item = T>) {
+    let model = model.as_any().downcast_ref::<VecModel<T>>().unwrap();
+    model.set_vec(iter.collect::<Vec<_>>());
 }
 
 async fn download_image(url: &str) -> anyhow::Result<Image> {
