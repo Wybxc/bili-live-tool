@@ -27,9 +27,11 @@ export global LoginLogic {
 export global UserLogic {
     in-out property <image> face;
     in-out property <string> uname;
+    in-out property <int> room-id;
 }
 
 export global LiveLogic {
+    in-out property <string> title;
     in-out property <[string]> area-list;
     in-out property <string> selected-area;
     in-out property <[string]> sub-area-list;
@@ -105,6 +107,10 @@ component MainPage {
         }
 
         VerticalBox {
+            Text {
+                text: "房间号: " + UserLogic.room-id;
+            }
+
             HorizontalBox {
                 padding: 0;
 

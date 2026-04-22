@@ -6,6 +6,7 @@ use std::{
 };
 
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
+use serde_aux::field_attributes::deserialize_number_from_string;
 use smol_str::SmolStr;
 
 #[derive(thiserror::Error, Debug)]
@@ -403,7 +404,8 @@ pub struct Area {
 
 #[derive(serde::Deserialize, Default, Debug)]
 pub struct SubArea {
-    pub id: SmolStr,
+    #[serde(deserialize_with = "deserialize_number_from_string")]
+    pub id: u64,
     pub name: SmolStr,
 }
 
@@ -484,11 +486,11 @@ fn deserialize_area_list() {
     assert_eq!(area.id, 2);
     assert_eq!(area.name, "网游");
     assert_eq!(area.list.len(), 3);
-    assert_eq!(area.list[0].id, "86");
+    assert_eq!(area.list[0].id, 86);
     assert_eq!(area.list[0].name, "英雄联盟");
-    assert_eq!(area.list[1].id, "252");
+    assert_eq!(area.list[1].id, 252);
     assert_eq!(area.list[1].name, "逃离塔科夫");
-    assert_eq!(area.list[2].id, "80");
+    assert_eq!(area.list[2].id, 80);
     assert_eq!(area.list[2].name, "绝地求生");
 }
 
@@ -607,14 +609,14 @@ pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
     json.into_data()
 }
 
-pub async fn update_area(room_id: u64, area_id: &str, csrf: &str) -> Result<()> {
+pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
     let client = client();
     let response = client
         .post(URL)
         .form(&[
             ("room_id", room_id.to_string().as_str()),
-            ("area_id", area_id),
+            ("area_id", area_id.to_string().as_str()),
             ("platform", "pc_link"),
             ("csrf_token", csrf),
             ("csrf", csrf),
@@ -652,7 +654,7 @@ pub struct Protocol {
 
 pub async fn start_live(
     room_id: u64,
-    area_id: &str,
+    area_id: u64,
     csrf: &str,
     version: LiveVersion,
     timestamp: u64,
@@ -663,7 +665,7 @@ pub async fn start_live(
         .post(URL)
         .form(&app_sign(vec![
             ("room_id", room_id.into()),
-            ("area_v2", area_id.to_string().into()),
+            ("area_v2", area_id.into()),
             ("platform", "pc_link".into()),
             ("backup_stream", "0".into()),
             ("csrf_token", csrf.to_string().into()),
