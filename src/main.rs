@@ -31,6 +31,7 @@ fn main() -> anyhow::Result<()> {
             .set_title("Application Error")
             .set_description(message)
             .set_buttons(rfd::MessageButtons::Ok)
+            .set_level(rfd::MessageLevel::Error)
             .show();
     }));
     tracing_subscriber::fmt::init();
