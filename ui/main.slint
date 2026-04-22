@@ -35,7 +35,8 @@ export global LiveLogic {
     in-out property <[string]> sub-area-list;
     in-out property <string> selected-sub-area;
     callback update-sub-area-list();
-    callback sync-live-area();
+    callback update-live-area();
+    callback update-live-title();
 }
 
 component LoginPage {
@@ -108,7 +109,25 @@ component MainPage {
                 padding: 0;
 
                 Text {
-                    text: "直播分区";
+                    text: "标题";
+                    vertical-alignment: center;
+                }
+
+                LineEdit {
+                    placeholder-text: "请输入直播标题";
+                }
+
+                Button {
+                    text: "更新";
+                    clicked => LiveLogic.update-live-title();
+                }
+            }
+
+            HorizontalBox {
+                padding: 0;
+
+                Text {
+                    text: "分区";
                     vertical-alignment: center;
                 }
 
@@ -124,8 +143,8 @@ component MainPage {
                 }
 
                 Button {
-                    text: "同步";
-                    clicked => LiveLogic.sync-live-area();
+                    text: "更新";
+                    clicked => LiveLogic.update-live-area();
                 }
             }
 
