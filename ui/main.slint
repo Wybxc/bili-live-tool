@@ -5,6 +5,7 @@ import {
     AboutSlint,
     Spinner,
     HorizontalBox,
+    ComboBox,
 } from "std-widgets.slint";
 
 enum LoginStatus {
@@ -22,9 +23,17 @@ export global LoginLogic {
     callback refresh-qr-code();
 }
 
-export global UserInfo {
+export global UserLogic {
     in-out property <image> face;
     in-out property <string> uname;
+}
+
+export global LiveLogic {
+    in-out property <[string]> area-list;
+    in-out property <string> selected-area;
+    in-out property <[string]> sub-area-list;
+    in-out property <string> selected-sub-area;
+    callback update-sub-area-list();
 }
 
 component LoginPage {
@@ -79,18 +88,44 @@ component MainPage {
                 Image {
                     width: parent.width;
                     height: parent.height;
-                    source: UserInfo.face;
+                    source: UserLogic.face;
                 }
             }
 
             Text {
-                text: UserInfo.uname;
+                text: UserLogic.uname;
                 font-size: 15px;
                 vertical-alignment: center;
+            }
+
+            Button {
+                text: "退出登录";
             }
         }
 
         VerticalBox {
+            HorizontalBox {
+                padding: 0;
+
+                Text {
+                    text: "直播分区";
+                    vertical-alignment: center;
+                }
+
+                ComboBox {
+                    model: LiveLogic.area-list;
+                    current-value <=> LiveLogic.selected-area;
+                    selected(_) => {
+                        LiveLogic.update-sub-area-list();
+                    }
+                }
+
+                ComboBox {
+                    model: LiveLogic.sub-area-list;
+                    current-value <=> LiveLogic.selected-sub-area;
+                }
+            }
+
             Button {
                 text: "开始直播";
             }

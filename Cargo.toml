@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-compat = "0.2.5"
+async-once-cell = "0.5.4"
 cookie_store = "0.22.1"
 directories = "6.0.0"
 image = { version = "0.25.10", default-features = false }

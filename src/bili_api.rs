@@ -395,6 +395,104 @@ fn deserialize_nav_user_info() {
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
+pub struct Area {
+    pub id: u64,
+    pub name: SmolStr,
+    pub list: Vec<SubArea>,
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct SubArea {
+    pub id: SmolStr,
+    pub name: SmolStr,
+}
+
+pub async fn get_live_area_list() -> Result<Vec<Area>> {
+    const URL: &str = "https://api.live.bilibili.com/room/v1/Area/getList";
+    let client = client();
+    let response = client.get(URL).send().await?;
+    let json: Response<Vec<Area>> = response.json().await?;
+    tracing::info!(
+        "Fetched area list with {} areas",
+        json.data.as_ref().map(|d| d.len()).unwrap_or(0)
+    );
+    json.into_data()
+}
+
+#[cfg(test)]
+#[test]
+fn deserialize_area_list() {
+    let json_str = r#"{
+        "code": 0,
+        "msg": "success",
+        "message": "success",
+        "data": [
+            {
+                "id": 2,
+                "name": "网游",
+                "list": [
+                    {
+                        "id": "86",
+                        "parent_id": "2",
+                        "old_area_id": "4",
+                        "name": "英雄联盟",
+                        "act_id": "0",
+                        "pk_status": "0",
+                        "hot_status": 1,
+                        "lock_status": "0",
+                        "pic": "http://i0.hdslb.com/bfs/vc/dcfb14f14ec83e503147a262e7607858b05d7ac0.png",
+                        "parent_name": "网游",
+                        "area_type": 0
+                    },
+                    {
+                        "id": "252",
+                        "parent_id": "2",
+                        "old_area_id": "3",
+                        "name": "逃离塔科夫",
+                        "act_id": "0",
+                        "pk_status": "0",
+                        "hot_status": 1,
+                        "lock_status": "0",
+                        "pic": "http://i0.hdslb.com/bfs/vc/762a7de3dd5fe8165d1d55b232484a017941592f.png",
+                        "parent_name": "网游",
+                        "area_type": 0
+                    },
+                    {
+                        "id": "80",
+                        "parent_id": "2",
+                        "old_area_id": "1",
+                        "name": "绝地求生",
+                        "act_id": "0",
+                        "pk_status": "0",
+                        "hot_status": 1,
+                        "lock_status": "0",
+                        "pic": "http://i0.hdslb.com/bfs/vc/43ca83fdcd10505eaeef1b76cf8ce642a53b94da.png",
+                        "parent_name": "网游",
+                        "area_type": 0
+                    }
+                ]
+            }
+        ]
+    }"#;
+
+    let response: Response<Vec<Area>> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 0);
+    assert_eq!(response.message, "success");
+    let data = response.into_data().unwrap();
+    assert_eq!(data.len(), 1);
+    let area = &data[0];
+    assert_eq!(area.id, 2);
+    assert_eq!(area.name, "网游");
+    assert_eq!(area.list.len(), 3);
+    assert_eq!(area.list[0].id, "86");
+    assert_eq!(area.list[0].name, "英雄联盟");
+    assert_eq!(area.list[1].id, "252");
+    assert_eq!(area.list[1].name, "逃离塔科夫");
+    assert_eq!(area.list[2].id, "80");
+    assert_eq!(area.list[2].name, "绝地求生");
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
 pub struct Timpstamp {
     pub now: u64,
 }
@@ -507,7 +605,7 @@ pub struct Protocol {
 
 pub async fn start_live(
     room_id: u64,
-    area_id: u64,
+    area_id: SmolStr,
     csrf: SmolStr,
     version: LiveVersion,
     timestamp: u64,
@@ -518,7 +616,7 @@ pub async fn start_live(
         .post(URL)
         .form(&app_sign(vec![
             ("room_id", room_id.into()),
-            ("area_v2", area_id.into()),
+            ("area_v2", area_id.to_string().into()),
             ("platform", "pc_link".into()),
             ("backup_stream", "0".into()),
             ("csrf_token", csrf.to_string().into()),
