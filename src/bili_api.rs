@@ -6,7 +6,7 @@ use std::{
 };
 
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
-use smol_str::SmolStr;
+use smol_str::{format_smolstr, SmolStr};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -394,6 +394,115 @@ fn deserialize_nav_user_info() {
     assert!(!data.is_login);
 }
 
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct Timpstamp {
+    pub now: u64,
+}
+
+pub async fn get_timestamp() -> Result<u64> {
+    const URL: &str = "https://api.bilibili.com/x/report/click/now";
+    let client = client();
+    let response = client.get(URL).send().await?;
+    let json: Response<Timpstamp> = response.json().await?;
+    tracing::info!(
+        "Fetched timestamp: {}",
+        json.data.as_ref().map(|d| d.now).unwrap_or(0)
+    );
+    let data = json.into_data()?;
+    Ok(data.now)
+}
+
+#[cfg(test)]
+#[test]
+fn deserialize_timestamp() {
+    let json_str = r#"{
+        "code": 0,
+        "message": "0",
+        "ttl": 1,
+        "data": {
+            "now": 1592666471
+        }
+    }"#;
+    let response: Response<Timpstamp> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 0);
+    assert_eq!(response.message, "0");
+    let data = response.into_data().unwrap();
+    assert_eq!(data.now, 1592666471);
+}
+
+#[derive(serde::Deserialize, Default, Debug)]
+pub struct LiveVersion {
+    pub curr_version: SmolStr,
+    pub build: u64,
+}
+
+pub async fn get_live_version(timestamp: u64) -> Result<LiveVersion> {
+    const URL: &str =
+        "https://api.live.bilibili.com/xlive/app-blink/v1/liveVersionInfo/getHomePageLiveVersion";
+    let client = client();
+    let response = client
+        .get(URL)
+        .query(&app_sign(vec![
+            ("system_version", 2.into()),
+            ("ts", timestamp.into()),
+        ]))
+        .send()
+        .await?;
+    let json: Response<LiveVersion> = response.json().await?;
+    tracing::info!(
+        "Fetched live version: {} (build {})",
+        json.data
+            .as_ref()
+            .map(|d| d.curr_version.as_str())
+            .unwrap_or("N/A"),
+        json.data.as_ref().map(|d| d.build).unwrap_or(0)
+    );
+    json.into_data()
+}
+
+#[cfg(test)]
+#[test]
+fn deserialize_live_version() {
+    let json_str = r#"{
+        "code": 0,
+        "message": "0",
+        "ttl": 1,
+        "data": {
+            "curr_version": "7.19.0.9432",
+            "build": 9432,
+            "instruction": "\u3010\u65b0\u589e\u3011\u65b0\u589e\u7f8e\u989c\u8c03\u6574\u5165\u53e3\n\u3010\u4f18\u5316\u3011\u5df2\u77e5\u95ee\u9898\u4f18\u5316",
+            "file_size": "300867136",
+            "file_md5": "e1619a8e2603aa94b58a58121f94403f",
+            "content": "<p>\u3010\u65b0\u589e\u3011\u65b0\u589e\u7f8e\u989c\u8c03\u6574\u5165\u53e3<br>\u3010\u4f18\u5316\u3011\u5df2\u77e5\u95ee\u9898\u4f18\u5316</p><p></p><p><br></p>",
+            "download_url": "https://dl.hdslb.com/bili/bililive/win/Livehime-Win-beta-7.19.0.9432-x64.exe",
+            "hdiffpatch_switch": 1
+        }
+    }"#;
+    let response: Response<LiveVersion> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 0);
+    assert_eq!(response.message, "0");
+    let data = response.into_data().unwrap();
+    assert_eq!(data.curr_version, "7.19.0.9432");
+    assert_eq!(data.build, 9432);
+}
+
+pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_json::Value)> {
+    // B站直播姬 App Key
+    const APP_KEY: &str = "aae92bc66f3edfab";
+    const APP_SEC: &str = "af125a0d5279fd576c1b4418a3e8276d";
+
+    params.push(("appkey", APP_KEY.into()));
+    params.sort_by_key(|(k, _)| *k);
+    let mut query = serde_urlencoded::to_string(&params).unwrap();
+    query.push_str(APP_SEC);
+
+    params.push((
+        "sign",
+        format!("{:x}", md5::compute(query.as_bytes())).into(),
+    ));
+    params
+}
+
 pub static COOKIE_STORE: LazyLock<Arc<CookieStoreMutex>> = LazyLock::new(|| {
     let store = load_cookies().unwrap_or_default();
     Arc::new(CookieStoreMutex::new(store))
@@ -421,14 +530,18 @@ pub fn save_cookies() {
 }
 
 fn client() -> reqwest_middleware::ClientWithMiddleware {
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-        .no_proxy() // TODO: make this configurable
-        .cookie_provider(COOKIE_STORE.clone())
-        .build()
-        .unwrap();
+    static CLIENT: LazyLock<reqwest_middleware::ClientWithMiddleware> = LazyLock::new(|| {
+        let client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            .no_proxy() // TODO: make this configurable
+            .cookie_provider(COOKIE_STORE.clone())
+            .build()
+            .unwrap();
 
-    reqwest_middleware::ClientBuilder::new(client)
-        .with(reqwest_tracing::TracingMiddleware::default())
-        .build()
+        reqwest_middleware::ClientBuilder::new(client)
+            .with(reqwest_tracing::TracingMiddleware::default())
+            .build()
+    });
+
+    CLIENT.clone()
 }

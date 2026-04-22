@@ -11,6 +11,7 @@ async-compat = "0.2.5"
 cookie_store = "0.22.1"
 directories = "6.0.0"
 image = { version = "0.25.10", default-features = false }
+md5 = "0.8.0"
 qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
 reqwest = { version = "0.13.2", features = ["json", "query", "cookies"] }
 reqwest-middleware = { version = "0.5.1", features = ["query"] }
@@ -20,6 +21,7 @@ rfd = "0.17.2"
 serde = "1.0.228"
 serde_json = "1.0.149"
 serde_repr = "0.1.20"
+serde_urlencoded = "0.7.1"
 slint = "1.16.0"
 smol_str = { version = "0.3.6", features = ["serde"] }
 thiserror = "2.0.18"
