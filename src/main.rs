@@ -311,7 +311,45 @@ async fn update_sub_area_list(logic: Weak<Logic<'static>>) {
 }
 
 async fn update_live_area(logic: Weak<Logic<'static>>) {
-    // let area
+    let selected_area_name = logic.unwrap().get_selected_area();
+    let selected_sub_area_name = logic.unwrap().get_selected_sub_area();
+    let Some(area_list) = live_area_list().await else {
+        return;
+    };
+    let Some(area) = area_list
+        .iter()
+        .find(|area| area.name.as_str() == selected_area_name.as_str())
+    else {
+        tracing::warn!("Area not found: {}", selected_area_name.as_str());
+        return;
+    };
+    let Some(sub_area) = area
+        .list
+        .iter()
+        .find(|sub_area| sub_area.name.as_str() == selected_sub_area_name.as_str())
+    else {
+        tracing::warn!(
+            "Sub area not found: {} > {}",
+            selected_area_name.as_str(),
+            selected_sub_area_name.as_str()
+        );
+        return;
+    };
+    let room_id = logic.unwrap().get_room_id();
+    let Ok(room_id) = room_id.parse::<u64>() else {
+        tracing::error!("Invalid room id: {room_id}");
+        return;
+    };
+    let Some(csrf) = bili_api::get_csrf_token() else {
+        tracing::error!("Failed to get CSRF token");
+        return;
+    };
+    if let Err(e) = bili_api::update_area(room_id, sub_area.id, &csrf).await {
+        tracing::error!("Failed to update live area: {}", e);
+        toast(logic, &format!("更新直播分区失败：{}", e));
+        return;
+    };
+    toast(logic, "更新直播分区成功");
 }
 
 async fn update_live_title(logic: Weak<Logic<'static>>) {
