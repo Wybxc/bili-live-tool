@@ -13,6 +13,8 @@ use smol_str::SmolStr;
 pub enum Error {
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
+    #[error("Failed to parse API response: {0}")]
+    Parse(#[from] serde_json::Error),
     #[error("Middleware error: {0}")]
     Middleware(anyhow::Error),
     #[error("API error: code {code}, message: {message}")]
@@ -72,7 +74,8 @@ pub async fn generate_passport_qrcode() -> Result<GeneratePassportQrcode> {
     const URL: &str = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate";
     let client = client();
     let response = client.get(URL).send().await?;
-    let json: Response<GeneratePassportQrcode> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<GeneratePassportQrcode> = serde_json::from_str(&response)?;
     tracing::info!(
         "Generated Passport QR code with URL: {}",
         json.data.as_ref().map(|d| d.url.as_str()).unwrap_or("N/A")
@@ -128,8 +131,8 @@ pub async fn poll_passport_qrcode_status(key: &str) -> Result<PollPassportQrcode
     const URL: &str = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll";
     let client = client();
     let response = client.get(URL).query(&[("qrcode_key", key)]).send().await?;
-
-    let json: Response<PollPassportQrcodeStatus> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<PollPassportQrcodeStatus> = serde_json::from_str(&response)?;
     tracing::info!(
         "Polled Passport QR code status: code {:?}, message {}",
         json.data.as_ref().map(|d| d.code).unwrap_or_default(),
@@ -247,7 +250,8 @@ pub async fn get_nav_user_info() -> Result<NavUserInfo> {
     const URL: &str = "https://api.bilibili.com/x/web-interface/nav";
     let client = client();
     let response = client.get(URL).send().await?;
-    let json: Response<NavUserInfo> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<NavUserInfo> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched nav user info: is_login={}, uname={}",
         json.data.as_ref().map(|d| d.is_login).unwrap_or(false),
@@ -408,7 +412,8 @@ pub async fn get_room_id(user_id: u64) -> Result<RoomId> {
     const URL: &str = "https://api.live.bilibili.com/room/v2/Room/room_id_by_uid";
     let client = client();
     let response = client.get(URL).query(&[("uid", user_id)]).send().await?;
-    let json: Response<RoomId> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<RoomId> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched room ID: {}",
         json.data.as_ref().map(|d| d.room_id).unwrap_or(0)
@@ -460,7 +465,8 @@ pub async fn get_room_info(room_id: u64) -> Result<RoomInfo> {
         .query(&[("room_id", room_id)])
         .send()
         .await?;
-    let json: Response<RoomInfo> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<RoomInfo> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched room info for room_id {}: title='{}', area_id={}, parent_area_id={}",
         room_id,
@@ -601,7 +607,8 @@ pub async fn get_live_area_list() -> Result<Vec<Area>> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Area/getList";
     let client = client();
     let response = client.get(URL).send().await?;
-    let json: Response<Vec<Area>> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<Vec<Area>> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched area list with {} areas",
         json.data.as_ref().map(|d| d.len()).unwrap_or(0)
@@ -696,7 +703,8 @@ pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
         ])
         .send()
         .await?;
-    let json: Response<NoneData> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<NoneData> = serde_json::from_str(&response)?;
     tracing::info!(
         "Updated live stream title to '{}' for room_id {}",
         title,
@@ -721,7 +729,8 @@ pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
         .send()
         .await
         .unwrap();
-    let json: Response<NoneData> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<NoneData> = serde_json::from_str(&response)?;
     tracing::info!(
         "Updated live stream area to '{}' for room_id {}",
         area_id,
@@ -740,7 +749,8 @@ pub async fn get_timestamp() -> Result<u64> {
     const URL: &str = "https://api.bilibili.com/x/report/click/now";
     let client = client();
     let response = client.get(URL).send().await?;
-    let json: Response<Timpstamp> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<Timpstamp> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched timestamp: {}",
         json.data.as_ref().map(|d| d.now).unwrap_or(0)
@@ -785,7 +795,8 @@ pub async fn get_live_version(timestamp: u64) -> Result<LiveVersion> {
         ]))
         .send()
         .await?;
-    let json: Response<LiveVersion> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<LiveVersion> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched live version: {} (build {})",
         json.data
@@ -825,8 +836,9 @@ fn deserialize_live_version() {
 
 #[derive(serde::Deserialize, Default, Debug)]
 pub struct StartLiveResponse {
+    pub change: i32,
     pub rtmp: Rtmp,
-    pub protocols: Vec<Protocol>,
+    pub protocols: Option<Vec<Protocol>>,
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
@@ -866,7 +878,8 @@ pub async fn start_live(
         ]))
         .send()
         .await?;
-    let response: Response<StartLiveResponse> = response.json().await?;
+    let response = response.text().await?;
+    let response: Response<StartLiveResponse> = serde_json::from_str(&response)?;
     tracing::info!(
         "Started live stream: RTMP addr {}, code {}, {} protocol(s) available",
         response
@@ -882,7 +895,7 @@ pub async fn start_live(
         response
             .data
             .as_ref()
-            .map(|d| d.protocols.len())
+            .map(|d| d.protocols.as_ref().map(|p| p.len()).unwrap_or(0))
             .unwrap_or(0)
     );
     response.into_data()
@@ -938,21 +951,71 @@ fn deserialize_start_live_response() {
     assert_eq!(response.code, 0);
     assert_eq!(response.message, "");
     let data = response.into_data().unwrap();
+    assert_eq!(data.change, 1);
     assert_eq!(data.rtmp.addr, "rtmp://live-push.bilivideo.com/live-bvc/");
     assert_eq!(
         data.rtmp.code,
         r"?streamname=live_348892132_32373699&key=e03061d4a7529d8eaa322dc4d330ca1c&schedule=rtmp&pflag=11"
     );
-    assert_eq!(data.protocols.len(), 1);
-    assert_eq!(data.protocols[0].protocol, "rtmp");
+    assert_eq!(data.protocols.as_ref().map(|p| p.len()).unwrap_or(0), 1);
+    assert_eq!(data.protocols.as_ref().unwrap()[0].protocol, "rtmp");
     assert_eq!(
-        data.protocols[0].addr,
+        data.protocols.as_ref().unwrap()[0].addr,
         "rtmp://live-push.bilivideo.com/live-bvc/"
     );
     assert_eq!(
-        data.protocols[0].code,
+        data.protocols.as_ref().unwrap()[0].code,
         r"?streamname=live_348892132_32373699&key=e73061d4a1002d8eaa322dc4d880ca1c&schedule=rtmp&pflag=11"
     );
+
+    let json_str = r#"{
+        "code": 60043,
+        "data": {
+            "change": 0,
+            "status": "",
+            "try_time": "0000-00-00 00:00:00",
+            "room_type": 0,
+            "live_key": "",
+            "sub_session_key": "",
+            "rtmp": {
+                "type": 0,
+                "addr": "",
+                "code": "",
+                "new_link": "",
+                "provider": ""
+            },
+            "protocols": null,
+            "notice": {
+                "type": 1,
+                "status": 0,
+                "title": "",
+                "msg": "",
+                "button_text": "",
+                "button_url": ""
+            },
+            "qr": "",
+            "need_face_auth": false,
+            "service_source": "live-streaming",
+            "rtmp_backup": null,
+            "up_stream_extra": null,
+            "protocols_backup": null,
+            "risk_extra": {
+                "v_voucher": "voucher_e7e5a77a-d48f-413b-b7d6-9badf662cd0a"
+            }
+        },
+        "message": "本次开播需要身份验证，请在关播时点击开播唤起人脸认证",
+        "msg": "本次开播需要身份验证，请在关播时点击开播唤起人脸认证"
+    }"#;
+    let response: Response<StartLiveResponse> = serde_json::from_str(json_str).unwrap();
+    assert_eq!(response.code, 60043);
+    assert_eq!(
+        response.message,
+        "本次开播需要身份验证，请在关播时点击开播唤起人脸认证"
+    );
+    let data = response.data.unwrap();
+    assert_eq!(data.rtmp.addr, "");
+    assert!(data.protocols.is_none());
+    assert_eq!(data.change, 0);
 }
 
 pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
@@ -967,7 +1030,8 @@ pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
         ])
         .send()
         .await?;
-    let json: Response<NoneData> = response.json().await?;
+    let response = response.text().await?;
+    let json: Response<NoneData> = serde_json::from_str(&response)?;
     tracing::info!(
         "Stopped live stream for room_id {}: code {}, message {}",
         room_id,

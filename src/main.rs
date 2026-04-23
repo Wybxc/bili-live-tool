@@ -484,7 +484,7 @@ async fn start_live(logic: Weak<Logic<'static>>) {
         addr: response.rtmp.addr.as_str().into(),
         code: response.rtmp.code.as_str().into(),
     }];
-    for protocol in &response.protocols {
+    for protocol in response.protocols.iter().flatten() {
         protocols.push(Protocol {
             name: protocol.protocol.to_uppercase().into(),
             addr: protocol.addr.as_str().into(),
