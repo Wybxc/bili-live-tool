@@ -414,6 +414,9 @@ async fn update_live_title(logic: Weak<Logic<'static>>) {
 }
 
 async fn start_live(logic: Weak<Logic<'static>>) {
+    update_live_title(logic.clone()).await;
+    update_live_area(logic.clone()).await;
+
     let room_id = logic.unwrap().get_room_id();
     let Ok(room_id) = room_id.parse::<u64>() else {
         tracing::error!("Invalid room id: {room_id}");
