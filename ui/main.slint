@@ -63,7 +63,7 @@ export global Logic {
     callback update-sub-area-list();
     callback update-live-area();
     callback update-live-title();
-    in-out property <LiveStatus> live-status: LiveStatus.Living;
+    in-out property <LiveStatus> live-status: LiveStatus.Off;
     in-out property <[Protocol]> protocols: [];
     callback start-live();
     callback stop-live();
@@ -250,6 +250,13 @@ component MainPage {
                         text: "更新";
                         clicked => Logic.update-live-area();
                     }
+                }
+
+                Text {
+                    text: "开始直播时自动更新标题和分区";
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    color: Palette.foreground.transparentize(60%);
                 }
 
                 Button {

@@ -178,6 +178,13 @@ async fn init_room_info(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
     let room_id = logic.unwrap().get_room_id().parse::<u64>()?;
     let room_info = bili_api::get_room_info(room_id).await?;
     logic.unwrap().set_title(room_info.title.as_str().into());
+    logic
+        .unwrap()
+        .set_live_status(if room_info.live_status == bili_api::LiveStatus::Living {
+            LiveStatus::Living
+        } else {
+            LiveStatus::Off
+        });
 
     if let Some(area_list) = live_area_list().await {
         let area = area_list
