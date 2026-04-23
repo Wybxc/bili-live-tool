@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -112,6 +113,20 @@ fn init(window: &MainWindow) {
         let logic = logic.as_weak();
         move || {
             spawn(update_live_title(logic.clone()));
+        }
+    });
+
+    logic.on_start_live({
+        let logic = logic.as_weak();
+        move || {
+            spawn(start_live(logic.clone()));
+        }
+    });
+
+    logic.on_stop_live({
+        let logic = logic.as_weak();
+        move || {
+            spawn(stop_live(logic.clone()));
         }
     });
 
@@ -396,6 +411,133 @@ async fn update_live_title(logic: Weak<Logic<'static>>) {
         return;
     }
     toast(logic, "更新标题成功");
+}
+
+async fn start_live(logic: Weak<Logic<'static>>) {
+    let room_id = logic.unwrap().get_room_id();
+    let Ok(room_id) = room_id.parse::<u64>() else {
+        tracing::error!("Invalid room id: {room_id}");
+        return;
+    };
+
+    let selected_area = logic.unwrap().get_selected_area();
+    let selected_sub_area = logic.unwrap().get_selected_sub_area();
+    let Some(area_list) = live_area_list().await else {
+        tracing::error!("Failed to get live area list");
+        return;
+    };
+    let Some(area) = area_list
+        .iter()
+        .find(|area| area.name.as_str() == selected_area.as_str())
+    else {
+        tracing::warn!("Area not found: {}", selected_area.as_str());
+        return;
+    };
+    let Some(sub_area) = area
+        .list
+        .iter()
+        .find(|sub_area| sub_area.name.as_str() == selected_sub_area.as_str())
+    else {
+        tracing::warn!(
+            "Sub area not found: {} > {}",
+            selected_area.as_str(),
+            selected_sub_area.as_str()
+        );
+        return;
+    };
+
+    let Some(csrf) = bili_api::get_csrf_token() else {
+        tracing::error!("Failed to get CSRF token");
+        return;
+    };
+
+    let timestamp = match bili_api::get_timestamp().await {
+        Ok(ts) => ts,
+        Err(e) => {
+            tracing::error!("Failed to get timestamp: {}", e);
+            toast(logic, &format!("获取时间戳失败：{}", e));
+            return;
+        }
+    };
+
+    let version = match bili_api::get_live_version(timestamp).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("Failed to get live version: {}", e);
+            toast(logic, &format!("获取直播版本失败：{}", e));
+            return;
+        }
+    };
+
+    let response = match bili_api::start_live(room_id, sub_area.id, &csrf, version, timestamp).await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::error!("Failed to start live: {}", e);
+            toast(logic, &format!("开播失败：{}", e));
+            return;
+        }
+    };
+
+    let mut protocols = vec![Protocol {
+        name: "RTMP".into(),
+        addr: response.rtmp.addr.as_str().into(),
+        code: response.rtmp.code.as_str().into(),
+    }];
+    for protocol in &response.protocols {
+        protocols.push(Protocol {
+            name: protocol.protocol.to_uppercase().into(),
+            addr: protocol.addr.as_str().into(),
+            code: protocol.code.as_str().into(),
+        });
+    }
+
+    // Add suffix to duplicate protocol names to distinguish them in the UI, e.g., "RTMP 1", "RTMP 2".
+    let mut freq = HashMap::new();
+    for protocol in &protocols {
+        *freq.entry(protocol.name.clone()).or_insert(0) += 1;
+    }
+    let mut suffix = HashMap::new();
+    let protocols = protocols
+        .into_iter()
+        .map(|protocol| {
+            if freq[protocol.name.as_str()] > 1 {
+                let count = suffix.entry(protocol.name.clone()).or_insert(0);
+                *count += 1;
+                Protocol {
+                    name: format!("{} {}", protocol.name.as_str(), *count).into(),
+                    ..protocol
+                }
+            } else {
+                protocol
+            }
+        })
+        .collect::<Vec<_>>();
+
+    set_array(&logic.unwrap().get_protocols(), protocols.into_iter());
+
+    logic.unwrap().set_live_status(LiveStatus::Living);
+
+    toast(logic, "开播成功");
+}
+
+async fn stop_live(logic: Weak<Logic<'static>>) {
+    let room_id = logic.unwrap().get_room_id();
+    let Ok(room_id) = room_id.parse::<u64>() else {
+        tracing::error!("Invalid room id: {room_id}");
+        return;
+    };
+    let Some(csrf) = bili_api::get_csrf_token() else {
+        tracing::error!("Failed to get CSRF token");
+        return;
+    };
+    if let Err(e) = bili_api::stop_live(room_id, &csrf).await {
+        tracing::error!("Failed to stop live: {}", e);
+        toast(logic, &format!("下播失败：{}", e));
+        return;
+    }
+    logic.unwrap().set_live_status(LiveStatus::Off);
+    toast(logic, "下播成功");
 }
 
 fn spawn<F: std::future::Future + 'static>(f: F) -> JoinHandle<F::Output> {
