@@ -10,6 +10,7 @@ import {
     Palette,
     TabWidget,
 } from "std-widgets.slint";
+import { Tabs, TabBar, TabBarButton, TabBody, Tab } from "tab.slint";
 
 enum LoginStatus {
     Waiting,
@@ -65,42 +66,10 @@ export global Logic {
     callback update-sub-area-list();
     callback update-live-area();
     callback update-live-title();
-    in-out property <LiveStatus> live-status: LiveStatus.Living;
-    in-out property <[Protocol]> protocols: [
-        {
-            name: "RTMP",
-            addr: "rtmp://example.com/live",
-            code: "123456",
-        },
-        {
-            name: "SRT",
-            addr: "srt://example.com:1234",
-            code: "abcdef",
-        }
-    ];
+    in-out property <LiveStatus> live-status: LiveStatus.Off;
+    in-out property <[Protocol]> protocols: [];
     callback start-live();
     callback stop-live();
-}
-
-component CustomPalette {
-    width: 0;
-    height: 0;
-
-    public pure function border() -> brush {
-        Palette.color-scheme == ColorScheme.dark ? oklch(0.333, 0, 0) : oklch(0.630, 0, 0)
-    }
-
-    public pure function background() -> brush {
-        Palette.color-scheme == ColorScheme.dark ? oklch(0.2264, 0, 0) : oklch(0.985, 0, 0)
-    }
-
-    public pure function accent(base: brush) -> brush {
-        Palette.color-scheme == ColorScheme.dark ? base.brighter(50%) : base.darker(50%)
-    }
-
-    public pure function decent(base: brush) -> brush {
-        Palette.color-scheme == ColorScheme.dark ? base.darker(50%) : base.brighter(50%)
-    }
 }
 
 component LoginPage {
@@ -144,7 +113,7 @@ component LoginPage {
 component InfoLine {
     in property <string> label;
     in property <string> text;
-    in property <bool> enable;
+    in property <bool> enable: true;
 
     HorizontalBox {
         padding: 0;
@@ -168,78 +137,36 @@ component InfoLine {
 }
 
 component ProtocolInfoTabs {
-    in-out property <int> active-tab;
-    VerticalLayout {
-        spacing: -1px;
+    property <int> active-tab;
 
-        tab_bar := HorizontalLayout {
-            spacing: -1px;
-            padding-left: 1px;
-            padding-right: 0px;
-
-            palette := CustomPalette { }
-
-            for protocol[index] in Logic.protocols: Rectangle {
-                border-top-left-radius: 5px;
-                border-top-right-radius: 5px;
-                border-width: 1px;
-                border-color: root.active-tab == index ? palette.border() : palette.decent(palette.border());
-                background: touch.pressed ? palette.accent(palette.accent(palette.background())) : touch.has-hover ? palette.accent(palette.background()) : palette.background();
-                height: txt.preferred-height * 2;
-                min-width: txt.preferred-width + 20px;
-                txt := Text {
-                    x: (parent.width - self.width) / 2 + (touch.pressed ? 2px : 0);
-                    y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0);
-                    text: protocol.name;
-                    color: Palette.foreground;
-                }
-
-                touch := TouchArea {
-                    clicked => {
-                        root.active-tab = index;
-                    }
-                }
+    Tabs {
+        TabBar {
+            for protocol[index] in Logic.protocols: TabBarButton {
+                title: protocol.name;
+                index: index;
+                active-tab <=> root.active-tab;
             }
         }
 
-        Rectangle {
-            clip: true;
-            width: measure.preferred-width;
-            height: measure.preferred-height;
-            border-color: Palette.border;
-            border-width: 1px;
-            border-bottom-left-radius: 5px;
-            border-bottom-right-radius: 5px;
+        TabBody {
+            width: root.width;
+            height: 100px;
 
-            measure := VerticalBox {
-                padding: 10px;
-                visible: false;
+            for protocol[index] in Logic.protocols: Tab {
+                index: index;
+                active-tab <=> root.active-tab;
+                tab-width: root.width;
 
                 InfoLine {
-                    enable: false;
-                }
-
-                InfoLine {
-                    enable: false;
-                }
-            }
-
-            for protocol[index] in Logic.protocols: VerticalBox {
-                padding: 10px;
-                x: root.active-tab == index ? 0 : root.active-tab < index ? - self.width - 1px : parent.width + 1px;
-                animate x {
-                    duration: 125ms;
-                    easing: ease;
-                }
-
-                InfoLine {
-                    label: "地址";
+                    label: "服务器";
                     text: protocol.addr;
+                    enable: protocol.addr != "";
                 }
 
                 InfoLine {
-                    label: "房间码";
+                    label: "推流码";
                     text: protocol.code;
+                    enable: protocol.code != "";
                 }
             }
         }
@@ -274,6 +201,7 @@ component MainPage {
         }
 
         VerticalBox {
+            width: 450px;
             Text {
                 text: "房间号: " + (Logic.room-id-status == RoomIdStatus.Fetching ? "获取中..." :  //
                        Logic.room-id-status == RoomIdStatus.Ok ? Logic.room-id :  //
@@ -337,7 +265,9 @@ component MainPage {
             if Logic.live-status == LiveStatus.Living: VerticalBox {
                 padding: 0;
 
-                ProtocolInfoTabs { }
+                ProtocolInfoTabs {
+                    width: parent.width;
+                }
 
                 Button {
                     text: "结束直播";

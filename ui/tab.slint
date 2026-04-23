@@ -1,0 +1,67 @@
+import { CustomPalette } from "palette.slint";
+import { Palette, VerticalBox } from "std-widgets.slint";
+
+export component Tabs inherits VerticalLayout {
+    spacing: -1px;
+}
+
+export component TabBar inherits HorizontalLayout {
+    spacing: -1px;
+    padding-left: 0px;
+    padding-right: 0px;
+}
+
+export component TabBarButton inherits Rectangle {
+    in property <string> title;
+    in property <int> index;
+    in-out property <int> active-tab;
+
+    palette := CustomPalette { }
+
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    border-width: 1px;
+    border-color: palette.border();
+    background: active-tab == index ? palette.accent(palette.background(), 10%) : //
+                            touch.pressed ? palette.accent(palette.background(), 10%) : //
+                            touch.has-hover ? palette.accent(palette.background(), 5%) : palette.background();
+    height: txt.preferred-height * 2;
+    min-width: txt.preferred-width + 20px;
+    txt := Text {
+        x: (parent.width - self.width) / 2 + (touch.pressed ? 2px : 0);
+        y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0);
+        text: title;
+        color: Palette.foreground;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.active-tab = index;
+        }
+    }
+}
+
+export component TabBody inherits Rectangle {
+    palette := CustomPalette { }
+
+    clip: true;
+    width: root.width;
+    height: root.height;
+    border-color: palette.border();
+    border-width: 1px;
+    border-bottom-left-radius: 5px;
+    border-bottom-right-radius: 5px;
+}
+
+export component Tab inherits VerticalBox {
+    in property <int> index;
+    in property <int> active-tab;
+    in property <length> tab-width;
+
+    padding: 10px;
+    x: active-tab == index ? 0 : active-tab < index ? - self.width - 1px : tab-width + 1px;
+    animate x {
+        duration: 125ms;
+        easing: ease;
+    }
+}
