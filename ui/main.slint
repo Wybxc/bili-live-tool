@@ -63,7 +63,7 @@ export global Logic {
     callback update-sub-area-list();
     callback update-live-area();
     callback update-live-title();
-    in-out property <LiveStatus> live-status: LiveStatus.Off;
+    in-out property <LiveStatus> live-status: LiveStatus.Living;
     in-out property <[Protocol]> protocols: [];
     callback start-live();
     callback stop-live();
@@ -262,6 +262,7 @@ component MainPage {
             if Logic.live-status == LiveStatus.Living: VerticalBox {
                 padding: 0;
 
+                if Logic.protocols.length > 0:
                 ProtocolInfoTabs {
                     width: parent.width;
                 }

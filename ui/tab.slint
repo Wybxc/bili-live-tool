@@ -35,6 +35,7 @@ export component TabBarButton inherits Rectangle {
     }
 
     touch := TouchArea {
+        enabled: active-tab != index;
         clicked => {
             root.active-tab = index;
         }
