@@ -286,22 +286,26 @@ component MainPage {
 
 component Notifications {
     VerticalBox {
-        for notification in Logic.notifications: Rectangle {
-            border-radius: 5px;
-            background: Palette.control-background;
+        for notification in Logic.notifications: HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                border-radius: 5px;
+                background: Palette.control-background;
+                width: text.preferred-width + 20px;
 
-            HorizontalBox {
-                Text {
-                    text: notification;
-                    color: Palette.control-foreground;
-                    vertical-alignment: center;
-                    horizontal-alignment: center;
+                HorizontalBox {
+                    text := Text {
+                        text: notification;
+                        color: Palette.control-foreground;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
 
-                    opacity: 0.0;
-                    init => {
-                        self.opacity = 1.0;
+                        opacity: 0.0;
+                        init => {
+                            self.opacity = 1.0;
+                        }
+                        animate opacity { duration: 0.2s; }
                     }
-                    animate opacity { duration: 0.2s; }
                 }
             }
         }
