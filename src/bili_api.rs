@@ -439,6 +439,17 @@ pub struct RoomInfo {
     pub title: String,
     pub area_id: u64,
     pub parent_area_id: u64,
+    pub live_status: LiveStatus,
+}
+
+#[derive(serde_repr::Deserialize_repr, Default, Debug, PartialEq, Eq, Clone, Copy)]
+#[repr(i32)]
+pub enum LiveStatus {
+    Off = 0,
+    Living = 1,
+    VideoPlaylist = 2,
+    #[default]
+    Unknown,
 }
 
 pub async fn get_room_info(room_id: u64) -> Result<RoomInfo> {
@@ -569,6 +580,7 @@ fn deserialize_room_info() {
     assert_eq!(data.title, "快乐运动研究社");
     assert_eq!(data.area_id, 145);
     assert_eq!(data.parent_area_id, 1);
+    assert_eq!(data.live_status, LiveStatus::VideoPlaylist);
 }
 
 #[derive(serde::Deserialize, Default, Debug)]

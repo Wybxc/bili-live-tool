@@ -8,6 +8,7 @@ import {
     ComboBox,
     StyleMetrics,
     Palette,
+    TabWidget,
 } from "std-widgets.slint";
 
 enum LoginStatus {
@@ -23,9 +24,23 @@ enum RoomIdStatus {
     Failed,
 }
 
+enum LiveStatus {
+    Off,
+    Living,
+}
+
+struct Protocol {
+    name: string,
+    addr: string,
+    code: string,
+}
+
 export global Logic {
     // Notifications
     in-out property <[string]> notifications: [];
+
+    // Platform
+    callback copy-to-clipboard(text: string);
 
     // Login
     in-out property <image> qr-code;
@@ -50,6 +65,42 @@ export global Logic {
     callback update-sub-area-list();
     callback update-live-area();
     callback update-live-title();
+    in-out property <LiveStatus> live-status: LiveStatus.Living;
+    in-out property <[Protocol]> protocols: [
+        {
+            name: "RTMP",
+            addr: "rtmp://example.com/live",
+            code: "123456",
+        },
+        {
+            name: "SRT",
+            addr: "srt://example.com:1234",
+            code: "abcdef",
+        }
+    ];
+    callback start-live();
+    callback stop-live();
+}
+
+component CustomPalette {
+    width: 0;
+    height: 0;
+
+    public pure function border() -> brush {
+        Palette.color-scheme == ColorScheme.dark ? oklch(0.333, 0, 0) : oklch(0.630, 0, 0)
+    }
+
+    public pure function background() -> brush {
+        Palette.color-scheme == ColorScheme.dark ? oklch(0.2264, 0, 0) : oklch(0.985, 0, 0)
+    }
+
+    public pure function accent(base: brush) -> brush {
+        Palette.color-scheme == ColorScheme.dark ? base.brighter(50%) : base.darker(50%)
+    }
+
+    public pure function decent(base: brush) -> brush {
+        Palette.color-scheme == ColorScheme.dark ? base.darker(50%) : base.brighter(50%)
+    }
 }
 
 component LoginPage {
@@ -90,6 +141,111 @@ component LoginPage {
     }
 }
 
+component InfoLine {
+    in property <string> label;
+    in property <string> text;
+    in property <bool> enable;
+
+    HorizontalBox {
+        padding: 0;
+        Text {
+            text: label;
+            width: 40px;
+            vertical-alignment: center;
+        }
+
+        LineEdit {
+            text: text;
+            read-only: true;
+        }
+
+        Button {
+            text: "复制";
+            enabled: enable;
+            clicked => Logic.copy-to-clipboard(text);
+        }
+    }
+}
+
+component ProtocolInfoTabs {
+    in-out property <int> active-tab;
+    VerticalLayout {
+        spacing: -1px;
+
+        tab_bar := HorizontalLayout {
+            spacing: -1px;
+            padding-left: 1px;
+            padding-right: 0px;
+
+            palette := CustomPalette { }
+
+            for protocol[index] in Logic.protocols: Rectangle {
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+                border-width: 1px;
+                border-color: root.active-tab == index ? palette.border() : palette.decent(palette.border());
+                background: touch.pressed ? palette.accent(palette.accent(palette.background())) : touch.has-hover ? palette.accent(palette.background()) : palette.background();
+                height: txt.preferred-height * 2;
+                min-width: txt.preferred-width + 20px;
+                txt := Text {
+                    x: (parent.width - self.width) / 2 + (touch.pressed ? 2px : 0);
+                    y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0);
+                    text: protocol.name;
+                    color: Palette.foreground;
+                }
+
+                touch := TouchArea {
+                    clicked => {
+                        root.active-tab = index;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            clip: true;
+            width: measure.preferred-width;
+            height: measure.preferred-height;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-bottom-left-radius: 5px;
+            border-bottom-right-radius: 5px;
+
+            measure := VerticalBox {
+                padding: 10px;
+                visible: false;
+
+                InfoLine {
+                    enable: false;
+                }
+
+                InfoLine {
+                    enable: false;
+                }
+            }
+
+            for protocol[index] in Logic.protocols: VerticalBox {
+                padding: 10px;
+                x: root.active-tab == index ? 0 : root.active-tab < index ? - self.width - 1px : parent.width + 1px;
+                animate x {
+                    duration: 125ms;
+                    easing: ease;
+                }
+
+                InfoLine {
+                    label: "地址";
+                    text: protocol.addr;
+                }
+
+                InfoLine {
+                    label: "房间码";
+                    text: protocol.code;
+                }
+            }
+        }
+    }
+}
+
 component MainPage {
     VerticalBox {
         HorizontalBox {
@@ -124,53 +280,70 @@ component MainPage {
                        Logic.room-id-status == RoomIdStatus.Failed ? "获取失败" : "未知状态");    //
             }
 
-            HorizontalBox {
+            if Logic.live-status != LiveStatus.Living:  VerticalBox {
                 padding: 0;
 
-                Text {
-                    text: "标题";
-                    vertical-alignment: center;
+                HorizontalBox {
+                    padding: 0;
+
+                    Text {
+                        text: "标题";
+                        vertical-alignment: center;
+                    }
+
+                    LineEdit {
+                        text <=> Logic.title;
+                        placeholder-text: "请输入直播标题";
+                    }
+
+                    Button {
+                        text: "更新";
+                        clicked => Logic.update-live-title();
+                    }
                 }
 
-                LineEdit {
-                    text <=> Logic.title;
-                    placeholder-text: "请输入直播标题";
+                HorizontalBox {
+                    padding: 0;
+
+                    Text {
+                        text: "分区";
+                        vertical-alignment: center;
+                    }
+
+                    ComboBox {
+                        model: Logic.area-list;
+                        current-value <=> Logic.selected-area;
+                        selected => Logic.update-sub-area-list();
+                    }
+
+                    ComboBox {
+                        model: Logic.sub-area-list;
+                        current-value <=> Logic.selected-sub-area;
+                    }
+
+                    Button {
+                        text: "更新";
+                        clicked => Logic.update-live-area();
+                    }
                 }
 
                 Button {
-                    text: "更新";
-                    clicked => Logic.update-live-title();
+                    text: "开始直播";
+                    primary: true;
+                    clicked => Logic.start-live();
                 }
             }
 
-            HorizontalBox {
+            if Logic.live-status == LiveStatus.Living: VerticalBox {
                 padding: 0;
 
-                Text {
-                    text: "分区";
-                    vertical-alignment: center;
-                }
-
-                ComboBox {
-                    model: Logic.area-list;
-                    current-value <=> Logic.selected-area;
-                    selected => Logic.update-sub-area-list();
-                }
-
-                ComboBox {
-                    model: Logic.sub-area-list;
-                    current-value <=> Logic.selected-sub-area;
-                }
+                ProtocolInfoTabs { }
 
                 Button {
-                    text: "更新";
-                    clicked => Logic.update-live-area();
+                    text: "结束直播";
+                    primary: true;
+                    clicked => Logic.stop-live();
                 }
-            }
-
-            Button {
-                text: "开始直播";
-                primary: true;
             }
         }
     }
@@ -202,8 +375,8 @@ component Notifications {
 
 export component MainWindow inherits Window {
     title: "Bili Live Tool";
-    width: 600px;
-    height: 500px;
+    preferred-width: 600px;
+    preferred-height: 500px;
 
     if Logic.login-status != LoginStatus.Success: LoginPage { }
     if Logic.login-status == LoginStatus.Success: MainPage { }

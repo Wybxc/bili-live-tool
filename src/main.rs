@@ -64,6 +64,21 @@ fn toast(logic: Weak<Logic<'static>>, message: &str) {
 fn init(window: &MainWindow) {
     let logic = window.global::<Logic>();
 
+    logic.on_copy_to_clipboard({
+        let logic = logic.as_weak();
+        move |text| {
+            if let Ok(()) = arboard::Clipboard::new()
+                .and_then(|mut clipboard| clipboard.set_text(&*text))
+                .inspect_err(|e| {
+                    tracing::error!("Failed to copy to clipboard: {}", e);
+                    toast(logic.clone(), "复制失败");
+                })
+            {
+                toast(logic.clone(), "复制成功");
+            }
+        }
+    });
+
     logic.on_refresh_qr_code({
         let logic = logic.as_weak();
         move || {

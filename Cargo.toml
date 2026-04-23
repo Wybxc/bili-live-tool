@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+arboard = "3.6.1"
 async-compat = "0.2.5"
 async-once-cell = "0.5.4"
 cookie_store = "0.22.1"
