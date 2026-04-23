@@ -386,7 +386,7 @@ async fn update_live_area(logic: Weak<Logic<'static>>) {
         tracing::error!("Failed to get CSRF token");
         return;
     };
-    if let Err(e) = bili_api::update_area(room_id, sub_area.id, &csrf).await {
+    if let Err(e) = bili_api::update_room_info(room_id, None, Some(sub_area.id), &csrf).await {
         tracing::error!("Failed to update live area: {}", e);
         toast(logic, &format!("更新直播分区失败：{}", e));
         return;
@@ -405,7 +405,7 @@ async fn update_live_title(logic: Weak<Logic<'static>>) {
         tracing::error!("Failed to get CSRF token");
         return;
     };
-    if let Err(e) = bili_api::update_title(room_id, &title, &csrf).await {
+    if let Err(e) = bili_api::update_room_info(room_id, Some(&title), None, &csrf).await {
         tracing::error!("Failed to update live title: {}", e);
         toast(logic, &format!("更新标题失败：{}", e));
         return;
@@ -414,8 +414,7 @@ async fn update_live_title(logic: Weak<Logic<'static>>) {
 }
 
 async fn start_live(logic: Weak<Logic<'static>>) {
-    update_live_title(logic.clone()).await;
-    update_live_area(logic.clone()).await;
+    let title = logic.unwrap().get_title();
 
     let room_id = logic.unwrap().get_room_id();
     let Ok(room_id) = room_id.parse::<u64>() else {
@@ -453,6 +452,15 @@ async fn start_live(logic: Weak<Logic<'static>>) {
         tracing::error!("Failed to get CSRF token");
         return;
     };
+
+    if let Err(e) =
+        bili_api::update_room_info(room_id, Some(&title), Some(sub_area.id), &csrf).await
+    {
+        tracing::error!("Failed to update room info: {}", e);
+        toast(logic, &format!("更新房间信息失败：{}", e));
+        return;
+    }
+    toast(logic.clone(), "更新房间信息成功，正在开播...");
 
     let timestamp = match bili_api::get_timestamp().await {
         Ok(ts) => ts,

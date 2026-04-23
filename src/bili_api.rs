@@ -689,52 +689,40 @@ fn deserialize_area_list() {
     assert_eq!(area.list[2].name, "绝地求生");
 }
 
-pub async fn update_title(room_id: u64, title: &str, csrf: &str) -> Result<()> {
+pub async fn update_room_info(
+    room_id: u64,
+    title: Option<&str>,
+    area_id: Option<u64>,
+    csrf: &str,
+) -> Result<()> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
     let client = client();
-    let response = client
-        .post(URL)
-        .form(&[
-            ("room_id", room_id.to_string().as_str()),
-            ("platform", "pc_link"),
-            ("title", title),
-            ("csrf_token", csrf),
-            ("csrf", csrf),
-        ])
-        .send()
-        .await?;
-    let response = response.text().await?;
-    let json: Response<NoneData> = serde_json::from_str(&response)?;
-    tracing::info!(
-        "Updated live stream title to '{}' for room_id {}",
-        title,
-        room_id
-    );
-    json.into_data()?;
-    Ok(())
-}
 
-pub async fn update_area(room_id: u64, area_id: u64, csrf: &str) -> Result<()> {
-    const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
-    let client = client();
-    let response = client
-        .post(URL)
-        .form(&[
-            ("room_id", room_id.to_string().as_str()),
-            ("area_id", area_id.to_string().as_str()),
-            ("platform", "pc_link"),
-            ("csrf_token", csrf),
-            ("csrf", csrf),
-        ])
-        .send()
-        .await
-        .unwrap();
+    let room_id = room_id.to_string();
+    let area_id = area_id.map(|id| id.to_string());
+    let mut params = vec![
+        ("room_id", room_id.as_str()),
+        ("platform", "pc_link"),
+        ("csrf_token", csrf),
+        ("csrf", csrf),
+    ];
+    if let Some(title) = title {
+        params.push(("title", title));
+    }
+    if let Some(area_id) = area_id.as_ref() {
+        params.push(("area_id", area_id.as_str()));
+    }
+
+    let response = client.post(URL).form(&params).send().await?;
     let response = response.text().await?;
     let json: Response<NoneData> = serde_json::from_str(&response)?;
     tracing::info!(
-        "Updated live stream area to '{}' for room_id {}",
-        area_id,
-        room_id
+        "Updated room info for room_id {}: title={}, area_id={}",
+        room_id,
+        title.unwrap_or("N/A"),
+        area_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "N/A".into())
     );
     json.into_data()?;
     Ok(())
