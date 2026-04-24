@@ -8,6 +8,7 @@ import {
     Palette,
 } from "std-widgets.slint";
 import { Tabs, TabBar, TabBarButton, TabBody, Tab } from "tab.slint";
+import { CustomPalette } from "palette.slint";
 
 enum LoginStatus {
     Waiting,
@@ -69,6 +70,32 @@ export global Logic {
     callback stop-live();
 }
 
+component QrCode {
+    in property <image> source;
+    in property <bool> ready;
+    width: 300px;
+    height: 300px;
+
+    if ready: Image {
+        width: 300px;
+        height: 300px;
+        source: source;
+        image-fit: contain;
+        image-rendering: pixelated;
+    }
+
+    if !ready: Rectangle {
+        width: 300px;
+        height: 300px;
+        background: #eee;
+        border-radius: 10px;
+
+        Spinner {
+            indeterminate: true;
+        }
+    }
+}
+
 component LoginPage {
     VerticalBox {
         Text {
@@ -79,25 +106,9 @@ component LoginPage {
             horizontal-alignment: center;
         }
 
-        if Logic.qr-code-ready:
-        Image {
-            width: 300px;
-            height: 300px;
+        QrCode {
             source: Logic.qr-code;
-            image-fit: contain;
-            image-rendering: pixelated;
-        }
-
-        if !Logic.qr-code-ready:
-        Rectangle {
-            width: 300px;
-            height: 300px;
-            background: #eee;
-            border-radius: 10px;
-
-            Spinner {
-                indeterminate: true;
-            }
+            ready: Logic.qr-code-ready;
         }
 
         Button {
@@ -171,6 +182,39 @@ component ProtocolInfoTabs {
 }
 
 component MainPage {
+    popup := PopupWindow {
+        close-policy: no-auto-close;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+
+        Rectangle {
+            palette := CustomPalette { }
+
+            background: Palette.background;
+            border-radius: 10px;
+            drop-shadow-blur: 2px;
+            drop-shadow-color: Palette.foreground.transparentize(80%);
+
+            VerticalBox {
+                padding: 10px;
+
+                Text {
+                    text: "请使用B站APP扫码完成人脸识别验证";
+                    horizontal-alignment: center;
+                }
+
+                QrCode {
+                    ready: false;
+                }
+
+                Button {
+                    text: "我已完成验证";
+                    clicked => popup.close();
+                }
+            }
+        }
+    }
+
     VerticalBox {
         HorizontalBox {
             Rectangle {
@@ -262,7 +306,10 @@ component MainPage {
                 Button {
                     text: "开始直播";
                     primary: true;
-                    clicked => Logic.start-live();
+                    // clicked => Logic.start-live();
+                    clicked => {
+                        popup.show();
+                    }
                 }
             }
 
