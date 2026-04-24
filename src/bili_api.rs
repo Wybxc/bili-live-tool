@@ -208,7 +208,10 @@ fn deserialize_poll_passport_qrcode_status() {
     assert_eq!(response.code, 0);
     assert_eq!(response.message, "0");
     let data = response.into_data().unwrap();
-    assert_eq!(data.url, "https://passport.biligame.com/crossDomain?DedeUserID=***&DedeUserID__ckMd5=***&Expires=***&SESSDATA=***&bili_jct=***&gourl=https%3A%2F%2Fpassport.bilibili.com");
+    assert_eq!(
+        data.url,
+        "https://passport.biligame.com/crossDomain?DedeUserID=***&DedeUserID__ckMd5=***&Expires=***&SESSDATA=***&bili_jct=***&gourl=https%3A%2F%2Fpassport.bilibili.com"
+    );
     assert_eq!(data.refresh_token, "***");
     assert_eq!(data.timestamp, 1662363009601);
     assert_eq!(data.code, PollPassportQrcodeStatusCode::Success);
@@ -827,6 +830,7 @@ pub struct StartLiveResponse {
     pub change: i32,
     pub rtmp: Rtmp,
     pub protocols: Option<Vec<Protocol>>,
+    pub qr: Option<SmolStr>,
 }
 
 #[derive(serde::Deserialize, Default, Debug)]
@@ -848,7 +852,7 @@ pub async fn start_live(
     csrf: &str,
     version: LiveVersion,
     timestamp: u64,
-) -> Result<StartLiveResponse> {
+) -> Result<Response<StartLiveResponse>> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/startLive";
     let client = client();
     let response = client
@@ -886,7 +890,7 @@ pub async fn start_live(
             .map(|d| d.protocols.as_ref().map(|p| p.len()).unwrap_or(0))
             .unwrap_or(0)
     );
-    response.into_data()
+    Ok(response)
 }
 
 #[cfg(test)]

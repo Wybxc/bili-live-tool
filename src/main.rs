@@ -12,6 +12,7 @@ use qrcode::QrCode;
 use slint::{
     Image, JoinHandle, Model, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel, Weak,
 };
+use smol_str::format_smolstr;
 
 use crate::bili_api::Area;
 
@@ -118,8 +119,9 @@ fn init(window: &MainWindow) {
 
     logic.on_start_live({
         let logic = logic.as_weak();
+        let window = window.as_weak();
         move || {
-            spawn(start_live(logic.clone()));
+            spawn(start_live(logic.clone(), window.clone()));
         }
     });
 
@@ -154,37 +156,38 @@ fn init(window: &MainWindow) {
 }
 
 async fn init_user(logic: Weak<Logic<'static>>) -> bool {
-    if let Ok(info) = bili_api::get_nav_user_info().await {
-        if info.is_login {
-            logic.unwrap().set_uname(info.uname.as_str().into());
-
-            logic.unwrap().set_room_id_status(RoomIdStatus::Fetching);
-            spawn({
-                let logic = logic.clone();
-                async move {
-                    if let Ok(room_id) = bili_api::get_room_id(info.mid).await {
-                        let logic = logic.unwrap();
-                        logic.set_room_id(room_id.room_id.to_string().into());
-                        logic.set_room_id_status(RoomIdStatus::Ok);
-                    } else {
-                        logic.unwrap().set_room_id_status(RoomIdStatus::Failed);
-                    }
-
-                    init_room_info(logic.clone()).await.unwrap_or_else(|e| {
-                        tracing::error!("Failed to initialize room info: {}", e);
-                    });
+    if let Ok(info) = bili_api::get_nav_user_info().await
+        && info.is_login
+    {
+        let l = logic.unwrap();
+        l.set_uname(info.uname.as_str().into());
+        l.set_user_id(info.mid.to_string().into());
+        l.set_room_id_status(RoomIdStatus::Fetching);
+        spawn({
+            let logic = logic.clone();
+            async move {
+                if let Ok(room_id) = bili_api::get_room_id(info.mid).await {
+                    let l = logic.unwrap();
+                    l.set_room_id(room_id.room_id.to_string().into());
+                    l.set_room_id_status(RoomIdStatus::Ok);
+                } else {
+                    logic.unwrap().set_room_id_status(RoomIdStatus::Failed);
                 }
-            });
 
-            spawn(async move {
-                let logic = logic.unwrap();
-                if let Ok(face) = download_image(info.face.as_str()).await {
-                    logic.set_face(face);
-                }
-            });
+                init_room_info(logic.clone()).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to initialize room info: {}", e);
+                });
+            }
+        });
 
-            return true;
-        }
+        spawn(async move {
+            let logic = logic.unwrap();
+            if let Ok(face) = download_image(info.face.as_str()).await {
+                logic.set_face(face);
+            }
+        });
+
+        return true;
     }
     false
 }
@@ -413,8 +416,10 @@ async fn update_live_title(logic: Weak<Logic<'static>>) {
     toast(logic, "更新标题成功");
 }
 
-async fn start_live(logic: Weak<Logic<'static>>) {
+async fn start_live(logic: Weak<Logic<'static>>, window: Weak<MainWindow>) {
     let title = logic.unwrap().get_title();
+
+    let user_id = logic.unwrap().get_user_id();
 
     let room_id = logic.unwrap().get_room_id();
     let Ok(room_id) = room_id.parse::<u64>() else {
@@ -488,6 +493,56 @@ async fn start_live(logic: Weak<Logic<'static>>) {
             toast(logic, &format!("开播失败：{}", e));
             return;
         }
+    };
+
+    // Face verification required
+    if response.code == 60024 || response.code == 60043 {
+        tracing::info!(
+            "Face verification required: code={}, message={}",
+            response.code,
+            response.message
+        );
+        let qr_url = response.data.and_then(|data| data.qr)
+            .filter(|qr|!qr.is_empty())
+            .unwrap_or_else(|| {
+                format_smolstr!("https://www.bilibili.com/blackboard/live/face-auth-middle.html?source_event=400&mid={user_id}")
+            });
+        window.unwrap().invoke_show_popup();
+
+        logic.unwrap().set_face_verfication_qr_code_ready(false);
+
+        let Ok(qrcode) = QrCode::new(qr_url) else {
+            tracing::error!("Fail to generate QR Code");
+            return;
+        };
+        let qrcode = qrcode.render::<Rgb<u8>>().build();
+        let buffer = SharedPixelBuffer::<Rgb8Pixel>::clone_from_slice(
+            qrcode.as_raw(),
+            qrcode.width(),
+            qrcode.height(),
+        );
+
+        let logic = logic.unwrap();
+        logic.set_face_verfication_qr_code(Image::from_rgb8(buffer));
+        logic.set_face_verfication_qr_code_ready(true);
+
+        return;
+    }
+
+    let response = if response.code != 0 {
+        tracing::error!(
+            "Failed to start live: code={}, message={}",
+            response.code,
+            response.message
+        );
+        toast(logic, &format!("开播失败：{}", response.message));
+        return;
+    } else if let Some(data) = response.data {
+        data
+    } else {
+        tracing::error!("Failed to start live: empty response data");
+        toast(logic, "开播失败：服务器未返回必要的数据");
+        return;
     };
 
     let mut protocols = vec![Protocol {

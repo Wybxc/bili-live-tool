@@ -52,6 +52,7 @@ export global Logic {
     // User
     in-out property <image> face;
     in-out property <string> uname;
+    in-out property <string> user-id;
     in-out property <string> room-id;
     in-out property <RoomIdStatus> room-id-status: RoomIdStatus.Fetching;
 
@@ -68,6 +69,8 @@ export global Logic {
     in-out property <[Protocol]> protocols: [];
     callback start-live();
     callback stop-live();
+    in-out property <image> face-verfication-qr-code;
+    in-out property <bool> face-verfication-qr-code-ready: false;
 }
 
 component QrCode {
@@ -182,39 +185,6 @@ component ProtocolInfoTabs {
 }
 
 component MainPage {
-    popup := PopupWindow {
-        close-policy: no-auto-close;
-        x: (parent.width - self.preferred-width) / 2;
-        y: (parent.height - self.preferred-height) / 2;
-
-        Rectangle {
-            palette := CustomPalette { }
-
-            background: Palette.background;
-            border-radius: 10px;
-            drop-shadow-blur: 2px;
-            drop-shadow-color: Palette.foreground.transparentize(80%);
-
-            VerticalBox {
-                padding: 10px;
-
-                Text {
-                    text: "请使用B站APP扫码完成人脸识别验证";
-                    horizontal-alignment: center;
-                }
-
-                QrCode {
-                    ready: false;
-                }
-
-                Button {
-                    text: "我已完成验证";
-                    clicked => popup.close();
-                }
-            }
-        }
-    }
-
     VerticalBox {
         HorizontalBox {
             Rectangle {
@@ -306,10 +276,7 @@ component MainPage {
                 Button {
                     text: "开始直播";
                     primary: true;
-                    // clicked => Logic.start-live();
-                    clicked => {
-                        popup.show();
-                    }
+                    clicked => Logic.start-live();
                 }
             }
 
@@ -366,6 +333,47 @@ export component MainWindow inherits Window {
 
     if Logic.login-status != LoginStatus.Success: LoginPage { }
     if Logic.login-status == LoginStatus.Success: MainPage { }
+
+    public function show-popup() {
+        popup.show();
+    }
+
+    popup := PopupWindow {
+        close-policy: no-auto-close;
+        x: (parent.width - self.preferred-width) / 2;
+        y: (parent.height - self.preferred-height) / 2;
+
+        Rectangle {
+            palette := CustomPalette { }
+
+            background: Palette.background;
+            border-radius: 10px;
+            drop-shadow-blur: 2px;
+            drop-shadow-color: Palette.foreground.transparentize(80%);
+
+            VerticalBox {
+                padding: 10px;
+
+                Text {
+                    text: "请使用B站APP扫码完成人脸验证";
+                    horizontal-alignment: center;
+                }
+
+                QrCode {
+                    ready: Logic.face-verfication-qr-code-ready;
+                    source: Logic.face-verfication-qr-code;
+                }
+
+                Button {
+                    text: "我已完成验证";
+                    clicked => {
+                        popup.close();
+                        Logic.start-live();
+                    }
+                }
+            }
+        }
+    }
 
     notifications := Notifications {
         y: 0;
