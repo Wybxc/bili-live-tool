@@ -1,38 +1,12 @@
-# Slint Rust Template
+# Bili Live Tool
 
-A template for a Rust application that's using [Slint](https://slint.rs/) for the user interface.
+Bilibili 直播推流辅助工具。通过 Bilibili API 获取 RTMP/SRT 等协议的推流地址与推流码，方便使用 OBS 等第三方推流软件开播。
 
-## About
+## 鸣谢
 
-This template helps you get started developing a Rust application with Slint as toolkit
-for the user interface. It demonstrates the integration between the `.slint` UI markup and
-Rust code, how to react to callbacks, get and set properties, and use basic widgets.
+- [bilibili_live_stream_code](https://github.com/ChaceQC/bilibili_live_stream_code)
+- [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect)
 
-## Usage
+## 许可
 
-1. Install Rust by following its [getting-started guide](https://www.rust-lang.org/learn/get-started).
-   Once this is done, you should have the `rustc` compiler and the `cargo` build system installed in your `PATH`.
-2. Download and extract the [ZIP archive of this repository](https://github.com/slint-ui/slint-rust-template/archive/refs/heads/main.zip).
-3. Rename the extracted directory and change into it:
-    ```
-    mv slint-rust-template-main my-project
-    cd my-project    
-    ```
-4. Build with `cargo`:
-    ```
-    cargo build
-    ```
-5. Run the application binary:
-    ```
-    cargo run
-    ```
-
-We recommend using an IDE for development, along with our [LSP-based IDE integration for `.slint` files](https://github.com/slint-ui/slint/blob/master/tools/lsp/README.md). You can also load this project directly in [Visual Studio Code](https://code.visualstudio.com) and install our [Slint extension](https://marketplace.visualstudio.com/items?itemName=Slint.slint).
-
-## Next Steps
-
-We hope that this template helps you get started, and that you enjoy exploring making user interfaces with Slint. To learn more
-about the Slint APIs and the `.slint` markup language, check out our [online documentation](https://slint.dev/docs).
-
-Don't forget to edit this readme to replace it by yours, and edit the `name =` field in `Cargo.toml` to match the name of your
-project.
+本项目基于 MIT 许可证发布，详见 [LICENSE](LICENSE)。
