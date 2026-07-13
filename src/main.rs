@@ -288,7 +288,9 @@ async fn login_session(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
             bili_api::PollPassportQrcodeStatusCode::Success => {
                 init_user(logic.clone()).await;
                 logic.unwrap().set_login_status(LoginStatus::Success);
-                bili_api::save_cookies();
+                if let Err(e) = bili_api::save_cookies() {
+                    tracing::error!("Failed to save cookies: {}", e);
+                }
                 tracing::info!("Login success");
                 break;
             }
@@ -308,7 +310,9 @@ async fn login_session(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
 }
 
 async fn logout(logic: Weak<Logic<'static>>) -> anyhow::Result<()> {
-    bili_api::clear_cookies();
+    if let Err(e) = bili_api::clear_cookies() {
+        tracing::error!("Failed to clear cookies: {}", e);
+    }
     logic.unwrap().set_login_status(LoginStatus::Waiting);
     Ok(())
 }

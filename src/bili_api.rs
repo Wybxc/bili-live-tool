@@ -1,9 +1,4 @@
-#![allow(dead_code)]
-
-use std::{
-    io::BufReader,
-    sync::{Arc, LazyLock},
-};
+use std::sync::{Arc, LazyLock};
 
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use serde_aux::field_attributes::deserialize_number_from_string;
@@ -825,6 +820,7 @@ fn deserialize_live_version() {
     assert_eq!(data.build, 9432);
 }
 
+#[allow(dead_code)]
 #[derive(serde::Deserialize, Default, Debug)]
 pub struct StartLiveResponse {
     pub change: i32,
@@ -1052,34 +1048,39 @@ pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_
 }
 
 pub static COOKIE_STORE: LazyLock<Arc<CookieStoreMutex>> = LazyLock::new(|| {
-    let store = load_cookies().unwrap_or_default();
+    let store = load_cookies()
+        .inspect_err(|e| tracing::error!("Failed to load cookies: {e}"))
+        .unwrap_or_default();
     Arc::new(CookieStoreMutex::new(store))
 });
 
-fn load_cookies() -> Option<CookieStore> {
-    let dirs = directories::ProjectDirs::from("cc", "wybxc", "bili-live-tool")?;
-    let path = dirs.data_dir().join("cookies.json");
-    let file = std::fs::File::open(&path).ok()?;
-    cookie_store::serde::json::load(BufReader::new(file)).ok()
+const SERVICE: &str = "bili-live-tool";
+const ENTRY: &str = "cookies";
+
+fn load_cookies() -> anyhow::Result<CookieStore> {
+    let entry = keyring::Entry::new(SERVICE, ENTRY)?;
+    let password = entry.get_password()?;
+    let store = cookie_store::serde::json::load(std::io::Cursor::new(password))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(store)
 }
 
-pub fn save_cookies() {
-    let dirs = match directories::ProjectDirs::from("cc", "wybxc", "bili-live-tool") {
-        Some(dirs) => dirs,
-        None => return,
-    };
-    let path = dirs.data_dir().join("cookies.json");
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    if let Ok(mut file) = std::fs::File::create(&path) {
-        let _ = cookie_store::serde::json::save(&COOKIE_STORE.lock().unwrap(), &mut file);
-    }
+pub fn save_cookies() -> anyhow::Result<()> {
+    let entry = keyring::Entry::new(SERVICE, ENTRY)?;
+    let mut buf = Vec::new();
+    let store = COOKIE_STORE.lock().unwrap();
+    cookie_store::serde::json::save(&store, &mut buf).map_err(|e| anyhow::anyhow!("{e}"))?;
+    entry
+        .set_password(std::str::from_utf8(&buf)?)
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-pub fn clear_cookies() {
+pub fn clear_cookies() -> anyhow::Result<()> {
     COOKIE_STORE.lock().unwrap().clear();
-    save_cookies();
+    let entry = keyring::Entry::new(SERVICE, ENTRY)?;
+    entry
+        .delete_credential()
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 pub fn get_csrf_token() -> Option<SmolStr> {
