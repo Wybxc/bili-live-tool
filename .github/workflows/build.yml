@@ -50,7 +50,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y fakeroot dpkg-dev
+          sudo apt-get install -y fakeroot dpkg-dev libfontconfig-dev
 
       - name: Install cargo-bundle
         run: cargo install cargo-bundle
