@@ -31,7 +31,7 @@ jobs:
 
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
-            bundle-format: msi
+            bundle-format: ""
             artifact-suffix: x86_64-windows
 
     runs-on: ${{ matrix.runner }}
@@ -55,8 +55,13 @@ jobs:
       - name: Install cargo-bundle
         run: cargo install cargo-bundle
 
-      - name: Build bundle
+      - name: Build bundle (Linux / macOS)
+        if: matrix.bundle-format != ''
         run: cargo bundle --release --target ${{ matrix.target }} --format ${{ matrix.bundle-format }}
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Create DMG (macOS)
         if: runner.os == 'macOS'
@@ -70,12 +75,19 @@ jobs:
               "bili-live-tool-${{ matrix.artifact-suffix }}.dmg"
           fi
 
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd "target/${{ matrix.target }}/release"
+          7z a "../../../bili-live-tool-${{ matrix.artifact-suffix }}.zip" bili-live-tool.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: bundle-${{ matrix.artifact-suffix }}
           path: |
             target/${{ matrix.target }}/release/bundle/
-            *.dmg
+            bili-live-tool-${{ matrix.artifact-suffix }}.dmg
+            bili-live-tool-${{ matrix.artifact-suffix }}.zip
           if-no-files-found: warn
 
   release:
@@ -90,7 +102,7 @@ jobs:
         run: |
           mkdir -p release-files
           find artifacts -type f \
-            \( -name "*.deb" -o -name "*.dmg" -o -name "*.msi" \) \
+            \( -name "*.deb" -o -name "*.dmg" -o -name "*.zip" \) \
             -exec cp {} release-files/ \;
           echo "=== Release files ==="
           ls -lh release-files/

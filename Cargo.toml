@@ -2,6 +2,7 @@
 name = "bili-live-tool"
 version = "0.1.0"
 edition = "2024"
+description = "A Bilibili live streaming assistant for streamers to obtain RTMP/SRT streaming addresses and codes."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
