@@ -1085,12 +1085,10 @@ pub fn clear_cookies() -> anyhow::Result<()> {
 
 pub fn get_csrf_token() -> Option<SmolStr> {
     let store = COOKIE_STORE.lock().unwrap();
-    for cookie in store.iter_any() {
-        if cookie.name() == "bili_jct" {
-            return Some(cookie.value().into());
-        }
-    }
-    None
+    store
+        .iter_any()
+        .find(|c| c.name() == "bili_jct")
+        .map(|c| c.value().into())
 }
 
 fn client() -> reqwest_middleware::ClientWithMiddleware {
