@@ -1,0 +1,114 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  FLOATING_TAG: nightly
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            bundle-format: deb
+            artifact-suffix: x86_64-linux
+
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            bundle-format: osx
+            artifact-suffix: aarch64-macos
+
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            bundle-format: msi
+            artifact-suffix: x86_64-windows
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fakeroot dpkg-dev
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
+
+      - name: Build bundle
+        run: cargo bundle --release --target ${{ matrix.target }} --format ${{ matrix.bundle-format }}
+
+      - name: Create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP="target/${{ matrix.target }}/release/bundle/osx/Bili Live Tool.app"
+          if [ -d "$APP" ]; then
+            hdiutil create \
+              -volname "Bili Live Tool" \
+              -srcfolder "$APP" \
+              -ov -format UDZO -imagekey zlib-level=9 \
+              "bili-live-tool-${{ matrix.artifact-suffix }}.dmg"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.artifact-suffix }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/
+            *.dmg
+          if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \
+            \( -name "*.deb" -o -name "*.dmg" -o -name "*.msi" \) \
+            -exec cp {} release-files/ \;
+          echo "=== Release files ==="
+          ls -lh release-files/
+
+      - name: Delete old nightly release
+        run: |
+          gh release delete "$FLOATING_TAG" --yes --repo "${{ github.repository }}" 2>/dev/null || true
+          git push origin --delete refs/tags/"$FLOATING_TAG" 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.FLOATING_TAG }}
+          name: "Nightly Build"
+          body: |
+            Automatic build from [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          prerelease: true
+          files: release-files/*
+          fail_on_unmatched_files: false
