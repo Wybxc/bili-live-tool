@@ -43,3 +43,4 @@ lto = true
 name = "Bili Live Tool"
 identifier = "cc.wybxc.bili-live-tool"
 category = "Utilities"
+icon = ["icons/icon-64.png", "icons/icon-128.png", "icons/icon-256.png", "icons/icon-256.png@x2"]
