@@ -68,11 +68,16 @@ jobs:
         run: |
           APP="target/${{ matrix.target }}/release/bundle/osx/Bili Live Tool.app"
           if [ -d "$APP" ]; then
+            codesign --force --deep --sign - "$APP"
+            STAGING=$(mktemp -d)
+            cp -R "$APP" "$STAGING/"
+            ln -s /Applications "$STAGING/Applications"
             hdiutil create \
               -volname "Bili Live Tool" \
-              -srcfolder "$APP" \
+              -srcfolder "$STAGING" \
               -ov -format UDZO -imagekey zlib-level=9 \
               "bili-live-tool-${{ matrix.artifact-suffix }}.dmg"
+            rm -rf "$STAGING"
           fi
 
       - name: Package binary (Windows)
