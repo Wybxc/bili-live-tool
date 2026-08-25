@@ -7,6 +7,7 @@ mod dashboard;
 mod login_page;
 mod profile_header;
 mod room_editor;
+mod utils;
 
 use gpui::*;
 use gpui_component::{ActiveTheme, Root, WindowExt};
@@ -18,46 +19,42 @@ use crate::{
 };
 
 enum AppPage {
-    Login {
-        view: Entity<LoginPage>,
-        _subscription: Subscription,
-    },
-    Dashboard {
-        view: Entity<Dashboard>,
-        _logout_subscription: Subscription,
-        _notification_subscription: Subscription,
-    },
+    Login { view: Entity<LoginPage> },
+    Dashboard { view: Entity<Dashboard> },
 }
 
 struct AppView {
     page: AppPage,
+    subscriptions: Vec<Subscription>,
 }
 
 impl AppView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let view = cx.new(|cx| LoginPage::new(window, cx));
-        let subscription = cx.subscribe_in(&view, window, |this, _, event, window, cx| {
-            let LoginEvent::LoggedIn(session) = event;
-            this.show_dashboard(session.clone(), window, cx);
-        });
-        Self {
-            page: AppPage::Login {
-                view,
-                _subscription: subscription,
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            |this, _, LoginEvent::LoggedIn(session), window, cx| {
+                this.show_dashboard(session.clone(), window, cx)
             },
+        );
+        Self {
+            page: AppPage::Login { view },
+            subscriptions: vec![subscription],
         }
     }
 
     fn show_login(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let view = cx.new(|cx| LoginPage::after_logout(window, cx));
-        let subscription = cx.subscribe_in(&view, window, |this, _, event, window, cx| {
-            let LoginEvent::LoggedIn(session) = event;
-            this.show_dashboard(session.clone(), window, cx);
-        });
-        self.page = AppPage::Login {
-            view,
-            _subscription: subscription,
-        };
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            |this, _, LoginEvent::LoggedIn(session), window, cx| {
+                this.show_dashboard(session.clone(), window, cx)
+            },
+        );
+        self.page = AppPage::Login { view };
+        self.subscriptions = vec![subscription];
         cx.notify();
     }
 
@@ -83,11 +80,8 @@ impl AppView {
                 window.push_notification(event.0.clone(), cx)
             },
         );
-        self.page = AppPage::Dashboard {
-            view,
-            _logout_subscription: logout_subscription,
-            _notification_subscription: notification_subscription,
-        };
+        self.page = AppPage::Dashboard { view };
+        self.subscriptions = vec![logout_subscription, notification_subscription];
         cx.notify();
     }
 }

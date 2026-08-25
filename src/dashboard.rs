@@ -15,7 +15,7 @@ pub enum DashboardEvent {
 pub struct Dashboard {
     profile: Entity<ProfileHeader>,
     broadcast: Entity<BroadcastPanel>,
-    _subscriptions: Vec<Subscription>,
+    subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<DashboardEvent> for Dashboard {}
@@ -28,9 +28,9 @@ impl Dashboard {
         let mut this = Self {
             profile: profile.clone(),
             broadcast: broadcast.clone(),
-            _subscriptions: Vec::new(),
+            subscriptions: Vec::new(),
         };
-        this._subscriptions.push(cx.subscribe_in(
+        this.subscriptions.push(cx.subscribe_in(
             &profile,
             window,
             |_, _, event: &ProfileHeaderEvent, _, cx| {
@@ -38,7 +38,7 @@ impl Dashboard {
                 cx.emit(DashboardEvent::Logout);
             },
         ));
-        this._subscriptions.push(cx.subscribe_in(
+        this.subscriptions.push(cx.subscribe_in(
             &broadcast,
             window,
             |_, _, event: &NotificationEvent, _, cx| cx.emit(event.clone()),

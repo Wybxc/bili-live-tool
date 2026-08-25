@@ -63,7 +63,7 @@ pub struct BroadcastPanel {
     user_id: u64,
     editor: Entity<RoomEditor>,
     state: BroadcastState,
-    _subscriptions: Vec<Subscription>,
+    subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<NotificationEvent> for BroadcastPanel {}
@@ -75,9 +75,9 @@ impl BroadcastPanel {
             user_id,
             editor: editor.clone(),
             state: BroadcastState::Offline,
-            _subscriptions: Vec::new(),
+            subscriptions: Vec::new(),
         };
-        this._subscriptions.push(cx.subscribe_in(
+        this.subscriptions.push(cx.subscribe_in(
             &editor,
             window,
             |this, _, event: &RoomEditorEvent, _, cx| {
@@ -88,7 +88,7 @@ impl BroadcastPanel {
                 }
             },
         ));
-        this._subscriptions.push(cx.subscribe_in(
+        this.subscriptions.push(cx.subscribe_in(
             &editor,
             window,
             |_, _, event: &NotificationEvent, _, cx| cx.emit(event.clone()),

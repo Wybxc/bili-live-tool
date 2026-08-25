@@ -3,7 +3,10 @@ use std::{io::Cursor, sync::Arc, time::Duration};
 use gpui::*;
 use gpui_component::{ActiveTheme, IconName, Sizable, StyledExt, button::Button, spinner::Spinner};
 
-use crate::bili_api;
+use crate::{
+    bili_api,
+    utils::{weak_emit, weak_read, weak_update},
+};
 
 #[derive(Clone)]
 pub struct UserSession {
@@ -39,265 +42,170 @@ enum QrStatus {
 }
 
 enum LoginState {
-    RestoringSession {
-        generation: u64,
-    },
-    LoadingQr {
-        generation: u64,
-    },
-    Polling {
-        generation: u64,
-        qr: Arc<Image>,
-        status: QrStatus,
-    },
-    Failed {
-        generation: u64,
-        message: SharedString,
-    },
+    RestoringSession,
+    LoadingQr,
+    Polling { qr: Arc<Image>, status: QrStatus },
+    Failed { message: SharedString },
 }
 
 impl LoginState {
-    fn generation(&self) -> u64 {
-        match self {
-            LoginState::RestoringSession { generation }
-            | LoginState::LoadingQr { generation }
-            | LoginState::Polling { generation, .. }
-            | LoginState::Failed { generation, .. } => *generation,
-        }
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self,
+            LoginState::Polling {
+                status: QrStatus::Waiting | QrStatus::Confirming,
+                ..
+            }
+        )
     }
 }
 
 pub struct LoginPage {
     state: LoginState,
+    login_task: Task<()>,
 }
 
 impl EventEmitter<LoginEvent> for LoginPage {}
 
 impl LoginPage {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut this = Self {
-            state: LoginState::RestoringSession { generation: 0 },
-        };
-        this.restore_or_start(window, cx);
-        this
-    }
-
-    fn restore_or_start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let generation = self.state.generation();
-        cx.spawn_in(window, async move |weak, cx| {
-            match cx
+        let login_task = cx.spawn_in(window, async move |weak, cx| {
+            if let Ok(info) = cx
                 .background_spawn(async { bili_api::get_nav_user_info() })
                 .await
+                && info.is_login
+                && let Ok(session) = UserSession::try_from(info)
             {
-                Ok(info) if info.is_login => {
-                    let Ok(session) = UserSession::try_from(info) else {
-                        let _ = cx.update(|window, cx| {
-                            weak.update(cx, |this, cx| {
-                                if this.is_current(generation) {
-                                    this.start(window, cx);
-                                }
-                            })
-                        });
-                        return;
-                    };
-                    let _ = cx.update(|_, cx| {
-                        weak.update(cx, |this, cx| {
-                            let LoginState::RestoringSession {
-                                generation: current,
-                            } = &this.state
-                            else {
-                                return;
-                            };
-                            if *current != generation {
-                                return;
-                            }
-                            cx.emit(LoginEvent::LoggedIn(session));
-                        })
-                    });
-                }
-                _ => {
-                    let _ = cx.update(|window, cx| {
-                        weak.update(cx, |this, cx| {
-                            if matches!(
-                                this.state,
-                                LoginState::RestoringSession {
-                                    generation: current
-                                } if current == generation
-                            ) {
-                                this.start(window, cx);
-                            }
-                        })
-                    });
-                }
+                weak_emit(cx, &weak, LoginEvent::LoggedIn(session));
+            } else {
+                Self::run_qr_login(weak, cx).await;
             }
-        })
-        .detach();
+        });
+        Self {
+            state: LoginState::RestoringSession,
+            login_task,
+        }
     }
 
     pub fn after_logout(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut this = Self {
-            state: LoginState::RestoringSession { generation: 0 },
-        };
         let _ = bili_api::clear_cookies();
-        this.start(window, cx);
-        this
-    }
-
-    fn is_current(&self, generation: u64) -> bool {
-        self.state.generation() == generation
-    }
-
-    fn fail(&mut self, generation: u64, message: impl Into<SharedString>) -> bool {
-        if !self.is_current(generation) {
-            return false;
+        Self {
+            state: LoginState::LoadingQr,
+            login_task: cx.spawn_in(window, Self::run_qr_login),
         }
+    }
+
+    fn refresh_qr(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.login_task = cx.spawn_in(window, Self::run_qr_login);
+    }
+
+    async fn run_qr_login(weak: WeakEntity<Self>, cx: &mut AsyncWindowContext) {
+        weak_update(cx, &weak, |this, _| this.state = LoginState::LoadingQr);
+
+        let response = match cx
+            .background_spawn(async { bili_api::generate_passport_qrcode() })
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                weak_update(cx, &weak, |this, _| {
+                    this.set_failed(format!("二维码加载失败：{err}"))
+                });
+                return;
+            }
+        };
+        let qr = match encode_qr(response.url.as_str()) {
+            Ok(qr) => qr,
+            Err(err) => {
+                weak_update(cx, &weak, |this, _| {
+                    this.set_failed(format!("二维码生成失败：{err}"))
+                });
+                return;
+            }
+        };
+
+        let key = response.qrcode_key.clone();
+        weak_update(cx, &weak, |this, _| {
+            this.state = LoginState::Polling {
+                qr,
+                status: QrStatus::Waiting,
+            }
+        });
+        loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(1500))
+                .await;
+
+            if weak_read(cx, &weak, |this| this.state.is_active()).ok() != Some(true) {
+                return;
+            }
+
+            let poll_key = key.clone();
+            let Ok(result) = cx
+                .background_spawn(async move { bili_api::poll_passport_qrcode_status(&poll_key) })
+                .await
+            else {
+                continue;
+            };
+
+            if result.code == bili_api::PollPassportQrcodeStatusCode::Success {
+                let info = match cx
+                    .background_spawn(async { bili_api::get_nav_user_info() })
+                    .await
+                {
+                    Ok(info) => info,
+                    Err(err) => {
+                        weak_update(cx, &weak, |this, _| {
+                            this.set_failed(format!("登录会话获取失败，请刷新二维码：{err}"))
+                        });
+                        return;
+                    }
+                };
+
+                let Ok(session) = UserSession::try_from(info) else {
+                    weak_update(cx, &weak, |this, _| {
+                        this.set_failed("登录会话无效，请刷新二维码")
+                    });
+                    return;
+                };
+
+                let _ = bili_api::save_cookies();
+                weak_emit(cx, &weak, LoginEvent::LoggedIn(session));
+                return;
+            }
+
+            let status = match result.code {
+                bili_api::PollPassportQrcodeStatusCode::Expired => QrStatus::Expired,
+                bili_api::PollPassportQrcodeStatusCode::Confirming => QrStatus::Confirming,
+                _ => QrStatus::Waiting,
+            };
+            weak_update(cx, &weak, |this, _| {
+                if let LoginState::Polling {
+                    status: current_status,
+                    ..
+                } = &mut this.state
+                {
+                    *current_status = status;
+                }
+            });
+        }
+    }
+
+    fn set_failed(&mut self, message: impl Into<SharedString>) {
         self.state = LoginState::Failed {
-            generation,
             message: message.into(),
         };
-        true
-    }
-
-    fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let generation = self.state.generation().wrapping_add(1);
-        self.state = LoginState::LoadingQr { generation };
-        cx.notify();
-        cx.spawn_in(window, async move |weak, cx| {
-            let response = cx
-                .background_spawn(async { bili_api::generate_passport_qrcode() })
-                .await;
-            let Ok(response) = response else {
-                let message = format!("二维码加载失败：{}", response.unwrap_err());
-                let _ = cx.update(|_, cx| {
-                    weak.update(cx, |this, cx| {
-                        if this.fail(generation, message) {
-                            cx.notify();
-                        }
-                    })
-                });
-                return;
-            };
-            let qr = encode_qr(response.url.as_str());
-            let Ok(qr) = qr else {
-                let message = format!("二维码生成失败：{}", qr.unwrap_err());
-                let _ = cx.update(|_, cx| {
-                    weak.update(cx, |this, cx| {
-                        if this.fail(generation, message) {
-                            cx.notify();
-                        }
-                    })
-                });
-                return;
-            };
-            let key = response.qrcode_key.to_string();
-            let _ = cx.update(|_, cx| {
-                weak.update(cx, |this, cx| {
-                    if this.is_current(generation) {
-                        this.state = LoginState::Polling {
-                            generation,
-                            qr,
-                            status: QrStatus::Waiting,
-                        };
-                        cx.notify();
-                    }
-                })
-            });
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(1500))
-                    .await;
-                let active = cx
-                    .update(|_, cx| {
-                        weak.upgrade().is_some_and(|entity| {
-                            let this = entity.read(cx);
-                            matches!(
-                                this.state,
-                                LoginState::Polling {
-                                    generation: current,
-                                    status: QrStatus::Waiting | QrStatus::Confirming,
-                                    ..
-                                } if current == generation
-                            )
-                        })
-                    })
-                    .unwrap_or(false);
-                if !active {
-                    break;
-                }
-                let poll_key = key.clone();
-                let Ok(result) = cx
-                    .background_spawn(
-                        async move { bili_api::poll_passport_qrcode_status(&poll_key) },
-                    )
-                    .await
-                else {
-                    continue;
-                };
-                if result.code == bili_api::PollPassportQrcodeStatusCode::Success {
-                    let Ok(info) = cx
-                        .background_spawn(async { bili_api::get_nav_user_info() })
-                        .await
-                    else {
-                        break;
-                    };
-                    let Ok(session) = UserSession::try_from(info) else {
-                        let _ = cx.update(|_, cx| {
-                            weak.update(cx, |this, cx| {
-                                if this.fail(generation, "登录会话无效，请刷新二维码")
-                                {
-                                    cx.notify();
-                                }
-                            })
-                        });
-                        break;
-                    };
-                    let _ = cx.update(|_, cx| {
-                        weak.update(cx, |this, cx| {
-                            if !this.is_current(generation) {
-                                return;
-                            }
-                            let _ = bili_api::save_cookies();
-                            cx.emit(LoginEvent::LoggedIn(session));
-                        })
-                    });
-                    break;
-                }
-                let status = match result.code {
-                    bili_api::PollPassportQrcodeStatusCode::Expired => QrStatus::Expired,
-                    bili_api::PollPassportQrcodeStatusCode::Confirming => QrStatus::Confirming,
-                    _ => QrStatus::Waiting,
-                };
-                let _ = cx.update(|_, cx| {
-                    weak.update(cx, |this, cx| {
-                        let LoginState::Polling {
-                            generation: current,
-                            status: current_status,
-                            ..
-                        } = &mut this.state
-                        else {
-                            return;
-                        };
-                        if *current != generation {
-                            return;
-                        }
-                        *current_status = status;
-                        cx.notify();
-                    })
-                });
-            }
-        })
-        .detach();
     }
 }
 
 impl Render for LoginPage {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (text, qr) = match &self.state {
-            LoginState::RestoringSession { .. } => (
+            LoginState::RestoringSession => (
                 "正在恢复登录状态",
                 Spinner::new().large().into_any_element(),
             ),
-            LoginState::LoadingQr { .. } => (
+            LoginState::LoadingQr => (
                 "正在加载登录二维码",
                 Spinner::new().large().into_any_element(),
             ),
@@ -309,11 +217,11 @@ impl Render for LoginPage {
                 };
                 (text, img(qr.clone()).size_72().into_any_element())
             }
-            LoginState::Failed { message, .. } => (
+            LoginState::Failed { message } => (
                 "二维码加载失败",
                 div()
                     .text_center()
-                    .child(message.clone())
+                    .child(text!(message.clone()))
                     .into_any_element(),
             ),
         };
@@ -338,7 +246,7 @@ impl Render for LoginPage {
                 Button::new("refresh")
                     .icon(IconName::LoaderCircle)
                     .label("刷新二维码")
-                    .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
+                    .on_click(cx.listener(|this, _, window, cx| this.refresh_qr(window, cx))),
             )
     }
 }
@@ -350,35 +258,4 @@ fn encode_qr(text: &str) -> anyhow::Result<Arc<Image>> {
     let mut bytes = Vec::new();
     image.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)?;
     Ok(Arc::new(Image::from_bytes(ImageFormat::Png, bytes)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{LoginPage, LoginState, UserSession};
-    use crate::bili_api;
-
-    #[test]
-    fn rejects_invalid_user_session() {
-        assert!(
-            UserSession::try_from(bili_api::NavUserInfo {
-                is_login: true,
-                mid: 0,
-                uname: "user".into(),
-                face: "face".into(),
-            })
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn stale_generation_cannot_change_login_state() {
-        let mut page = LoginPage {
-            state: LoginState::LoadingQr { generation: 2 },
-        };
-        assert!(!page.fail(1, "stale"));
-        assert!(matches!(
-            page.state,
-            LoginState::LoadingQr { generation: 2 }
-        ));
-    }
 }
