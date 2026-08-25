@@ -12,7 +12,7 @@ mod ureq_http_client;
 mod utils;
 
 use gpui::*;
-use gpui_component::{ActiveTheme, Root};
+use gpui_component::{ActiveTheme, Root, Theme, ThemeRegistry, ThemeSet};
 
 use crate::{
     dashboard::{Dashboard, DashboardEvent},
@@ -98,6 +98,34 @@ impl Render for AppView {
     }
 }
 
+const THEME_SET: &str = include_str!("../themes/ayu.json");
+
+fn load_theme_set(cx: &mut App) -> anyhow::Result<()> {
+    let theme_set: ThemeSet = serde_json::from_str(THEME_SET)?;
+    ThemeRegistry::global_mut(cx).load_themes_from_str(THEME_SET)?;
+
+    let registry = ThemeRegistry::global(cx);
+    let light = theme_set
+        .themes
+        .iter()
+        .find(|theme| !theme.mode.is_dark())
+        .and_then(|theme| registry.themes().get(&theme.name))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("主题集合缺少浅色主题"))?;
+    let dark = theme_set
+        .themes
+        .iter()
+        .find(|theme| theme.mode.is_dark())
+        .and_then(|theme| registry.themes().get(&theme.name))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("主题集合缺少深色主题"))?;
+
+    let theme = Theme::global_mut(cx);
+    theme.light_theme = light;
+    theme.dark_theme = dark;
+    Ok(())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
     let app = gpui_platform::application()
@@ -105,6 +133,7 @@ fn main() {
         .with_http_client(Arc::new(ureq_http_client::UreqHttpClient::new()));
     app.run(|cx| {
         gpui_component::init(cx);
+        load_theme_set(cx).expect("load bundled theme set");
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(720.), px(560.)), cx)),
             ..Default::default()
@@ -112,6 +141,12 @@ fn main() {
         cx.spawn(async move |cx| {
             cx.open_window(window_options, |w, cx| {
                 w.set_window_title("Bili Live Tool");
+
+                Theme::sync_system_appearance(Some(w), cx);
+                w.observe_window_appearance(|window, cx| {
+                    Theme::sync_system_appearance(Some(window), cx);
+                })
+                .detach();
                 let view = cx.new(|cx| AppView::new(w, cx));
                 cx.new(|cx| Root::new(view, w, cx).bg(cx.theme().background))
             })

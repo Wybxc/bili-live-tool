@@ -1,6 +1,6 @@
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, IconName, Sizable, ThemeMode,
+    IconName, Sizable,
     avatar::Avatar,
     button::{Button, ButtonVariants},
     h_flex,
@@ -46,20 +46,6 @@ impl RenderOnce for ProfileHeader {
                     .icon(IconName::Close)
                     .label("退出登录")
                     .on_click(on_logout),
-            )
-            .child(
-                Button::new("theme")
-                    .ghost()
-                    .icon(IconName::Sun)
-                    .tooltip("切换主题")
-                    .on_click(|_, _, cx| {
-                        let next = if cx.theme().mode.is_dark() {
-                            ThemeMode::Light
-                        } else {
-                            ThemeMode::Dark
-                        };
-                        gpui_component::Theme::change(next, None, cx)
-                    }),
             )
     }
 }
