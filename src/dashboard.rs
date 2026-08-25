@@ -30,20 +30,17 @@ impl Dashboard {
 
 impl Render for Dashboard {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dashboard = cx.entity().downgrade();
         v_flex()
             .size_full()
             .p_8()
             .gap_6()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(ProfileHeader::new(
-                self.name.clone(),
-                self.avatar.clone(),
-                move |_, _, cx| {
-                    let _ = dashboard.update(cx, |_, cx| cx.emit(DashboardEvent::Logout));
-                },
-            ))
+            .child(ProfileHeader {
+                name: self.name.clone(),
+                avatar: self.avatar.clone(),
+                on_logout: cx.listener(|_, _, _, cx| cx.emit(DashboardEvent::Logout)),
+            })
             .child(self.broadcast.clone())
     }
 }

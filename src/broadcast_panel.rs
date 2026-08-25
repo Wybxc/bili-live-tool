@@ -221,39 +221,14 @@ impl BroadcastPanel {
 impl Render for BroadcastPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let room = self.editor.read(cx).room_label();
-        let panel = cx.entity().downgrade();
-        let content = match &self.state {
-            BroadcastState::Offline
-            | BroadcastState::Starting
-            | BroadcastState::AwaitingFaceVerification => BroadcastSetup {
-                editor: self.editor.clone(),
-                panel,
-                starting: matches!(self.state, BroadcastState::Starting),
-                awaiting_verification: matches!(
-                    self.state,
-                    BroadcastState::AwaitingFaceVerification
-                ),
-            }
-            .into_any_element(),
-            BroadcastState::LiveWithoutCredentials => ProtocolPanel {
-                protocols: None,
-                panel,
-                stopping: false,
-            }
-            .into_any_element(),
-            BroadcastState::Living(protocols) => ProtocolPanel {
-                protocols: Some(protocols.clone()),
-                panel,
-                stopping: false,
-            }
-            .into_any_element(),
-            BroadcastState::Stopping { protocols } => ProtocolPanel {
-                protocols: protocols.clone(),
-                panel,
-                stopping: true,
-            }
-            .into_any_element(),
+
+        let protocols = match &self.state {
+            BroadcastState::Living(protocols) => Some(protocols.clone()),
+            BroadcastState::Stopping { protocols } => protocols.clone(),
+            _ => None,
         };
+        let stopping = matches!(self.state, BroadcastState::Stopping { .. });
+
         v_flex()
             .gap_5()
             .child(
@@ -262,7 +237,30 @@ impl Render for BroadcastPanel {
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("房间号：{room}")),
             )
-            .child(content)
+            .child(match &self.state {
+                BroadcastState::Offline
+                | BroadcastState::Starting
+                | BroadcastState::AwaitingFaceVerification => BroadcastSetup {
+                    editor: self.editor.clone(),
+                    starting: matches!(self.state, BroadcastState::Starting),
+                    awaiting_verification: matches!(
+                        self.state,
+                        BroadcastState::AwaitingFaceVerification
+                    ),
+                    on_start: cx.listener(|this, _, window, cx| this.start(window, cx)),
+                }
+                .into_any_element(),
+                _ => ProtocolPanel {
+                    protocols,
+                    stopping,
+                    on_select_protocol: cx.listener(|this, index, _, cx| {
+                        this.select_protocol(*index);
+                        cx.notify();
+                    }),
+                    on_stop: cx.listener(|this, _, window, cx| this.stop(window, cx)),
+                }
+                .into_any_element(),
+            })
     }
 }
 
@@ -302,14 +300,20 @@ impl RenderOnce for FaceVerificationActions {
 }
 
 #[derive(IntoElement)]
-struct BroadcastSetup {
+struct BroadcastSetup<F>
+where
+    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     editor: Entity<RoomEditor>,
-    panel: WeakEntity<BroadcastPanel>,
     starting: bool,
     awaiting_verification: bool,
+    on_start: F,
 }
 
-impl RenderOnce for BroadcastSetup {
+impl<F> RenderOnce for BroadcastSetup<F>
+where
+    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         v_flex().gap_5().child(self.editor).child(
             Button::new("start")
@@ -321,9 +325,7 @@ impl RenderOnce for BroadcastSetup {
                     "开始直播"
                 })
                 .loading(self.starting)
-                .on_click(move |_, window, cx| {
-                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
-                }),
+                .on_click(self.on_start),
         )
     }
 }
@@ -367,29 +369,31 @@ impl RenderOnce for ProtocolLine {
 }
 
 #[derive(IntoElement)]
-struct ProtocolPanel {
+struct ProtocolPanel<F, G>
+where
+    F: Fn(&usize, &mut Window, &mut App) + 'static,
+    G: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     protocols: Option<ProtocolSet>,
-    panel: WeakEntity<BroadcastPanel>,
     stopping: bool,
+    on_select_protocol: F,
+    on_stop: G,
 }
 
-impl RenderOnce for ProtocolPanel {
+impl<F, G> RenderOnce for ProtocolPanel<F, G>
+where
+    F: Fn(&usize, &mut Window, &mut App) + 'static,
+    G: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let details = if let Some(protocols) = self.protocols {
-            let panel = self.panel.clone();
-
             let protocol = protocols.active();
             v_flex()
                 .child(
                     TabBar::new("protocols")
                         .underline()
                         .selected_index(protocols.active)
-                        .on_click(move |index: &usize, _, cx| {
-                            let _ = panel.update(cx, |this, cx| {
-                                this.select_protocol(*index);
-                                cx.notify();
-                            });
-                        })
+                        .on_click(self.on_select_protocol)
                         .children(
                             protocols
                                 .items
@@ -420,16 +424,14 @@ impl RenderOnce for ProtocolPanel {
                 .child("当前直播不是由本次会话启动，无法恢复推流码")
                 .into_any_element()
         };
-        let panel = self.panel;
+
         v_flex().gap_5().child(details).child(
             Button::new("stop")
                 .danger()
                 .icon(IconName::Close)
                 .label("结束直播")
                 .loading(self.stopping)
-                .on_click(move |_, window, cx| {
-                    let _ = panel.update(cx, |this, cx| this.stop(window, cx));
-                }),
+                .on_click(self.on_stop),
         )
     }
 }

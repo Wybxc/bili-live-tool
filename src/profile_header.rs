@@ -6,30 +6,20 @@ use gpui_component::{
     h_flex,
 };
 
-type LogoutHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
-
 #[derive(IntoElement)]
-pub struct ProfileHeader {
-    name: SharedString,
-    avatar: ImageSource,
-    on_logout: LogoutHandler,
+pub struct ProfileHeader<F>
+where
+    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
+    pub name: SharedString,
+    pub avatar: ImageSource,
+    pub on_logout: F,
 }
 
-impl ProfileHeader {
-    pub fn new(
-        name: SharedString,
-        avatar: ImageSource,
-        on_logout: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        Self {
-            name,
-            avatar,
-            on_logout: Box::new(on_logout),
-        }
-    }
-}
-
-impl RenderOnce for ProfileHeader {
+impl<F> RenderOnce for ProfileHeader<F>
+where
+    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let avatar = Avatar::new()
             .src(self.avatar.clone())
