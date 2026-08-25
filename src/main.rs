@@ -29,6 +29,10 @@ struct AppView {
     _subscriptions: Vec<Subscription>,
 }
 
+struct AppViewStore(Entity<AppView>);
+
+impl Global for AppViewStore {}
+
 impl AppView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let view = cx.new(|cx| LoginPage::new(window, cx));
@@ -126,32 +130,48 @@ fn load_theme_set(cx: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn open_main_window(cx: &mut App) -> anyhow::Result<()> {
+    let window_options = WindowOptions {
+        window_bounds: Some(WindowBounds::centered(size(px(720.), px(560.)), cx)),
+        ..Default::default()
+    };
+    cx.open_window(window_options, |window, cx| {
+        window.set_window_title("Bili Live Tool");
+        window.activate_window();
+
+        Theme::sync_system_appearance(Some(window), cx);
+        window
+            .observe_window_appearance(|window, cx| {
+                Theme::sync_system_appearance(Some(window), cx);
+            })
+            .detach();
+        let view = if let Some(store) = cx.try_global::<AppViewStore>() {
+            store.0.clone()
+        } else {
+            let view = cx.new(|cx| AppView::new(window, cx));
+            cx.set_global(AppViewStore(view.clone()));
+            view
+        };
+        cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
+    })?;
+    Ok(())
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
     let app = gpui_platform::application()
         .with_assets(gpui_component_assets::Assets)
         .with_http_client(Arc::new(ureq_http_client::UreqHttpClient::new()));
+    app.on_reopen(|cx| {
+        if cx.windows().is_empty()
+            && let Err(error) = open_main_window(cx)
+        {
+            tracing::error!("Failed to reopen main window: {error:#}");
+        }
+    });
     app.run(|cx| {
         gpui_component::init(cx);
         load_theme_set(cx).expect("load bundled theme set");
-        let window_options = WindowOptions {
-            window_bounds: Some(WindowBounds::centered(size(px(720.), px(560.)), cx)),
-            ..Default::default()
-        };
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |w, cx| {
-                w.set_window_title("Bili Live Tool");
-
-                Theme::sync_system_appearance(Some(w), cx);
-                w.observe_window_appearance(|window, cx| {
-                    Theme::sync_system_appearance(Some(window), cx);
-                })
-                .detach();
-                let view = cx.new(|cx| AppView::new(w, cx));
-                cx.new(|cx| Root::new(view, w, cx).bg(cx.theme().background))
-            })
-            .expect("open window")
-        })
-        .detach()
+        open_main_window(cx).expect("open main window");
     })
 }
