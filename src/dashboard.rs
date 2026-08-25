@@ -40,7 +40,7 @@ impl Render for Dashboard {
             .child(ProfileHeader::new(
                 self.name.clone(),
                 self.avatar.clone(),
-                move |_, cx| {
+                move |_, _, cx| {
                     let _ = dashboard.update(cx, |_, cx| cx.emit(DashboardEvent::Logout));
                 },
             ))

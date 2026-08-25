@@ -58,187 +58,13 @@ pub struct BroadcastPanel {
     user_id: u64,
     editor: Entity<RoomEditor>,
     state: BroadcastState,
-    subscriptions: Vec<Subscription>,
-}
-
-#[derive(IntoElement)]
-struct FaceVerificationContent {
-    qr: Arc<Image>,
-}
-
-impl RenderOnce for FaceVerificationContent {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        DialogContent::new()
-            .v_flex()
-            .items_center()
-            .gap_4()
-            .child("请使用 B 站 APP 扫码完成人脸验证")
-            .child(img(self.qr).size_64())
-    }
-}
-
-#[derive(IntoElement)]
-struct FaceVerificationActions {
-    panel: WeakEntity<BroadcastPanel>,
-}
-
-impl RenderOnce for FaceVerificationActions {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        DialogFooter::new().child(
-            Button::new("verified")
-                .primary()
-                .label("我已完成验证")
-                .on_click(move |_, window, cx| {
-                    window.close_dialog(cx);
-                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
-                }),
-        )
-    }
-}
-
-#[derive(IntoElement)]
-struct BroadcastSetup {
-    editor: Entity<RoomEditor>,
-    panel: WeakEntity<BroadcastPanel>,
-    starting: bool,
-    awaiting_verification: bool,
-}
-
-impl RenderOnce for BroadcastSetup {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        v_flex().gap_5().child(self.editor).child(
-            Button::new("start")
-                .primary()
-                .icon(IconName::Play)
-                .label(if self.awaiting_verification {
-                    "重新验证"
-                } else {
-                    "开始直播"
-                })
-                .loading(self.starting)
-                .on_click(move |_, window, cx| {
-                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
-                }),
-        )
-    }
-}
-
-#[derive(IntoElement)]
-struct ProtocolLine {
-    id: &'static str,
-    label: &'static str,
-    value: SharedString,
-}
-
-impl RenderOnce for ProtocolLine {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let value = self.value;
-        h_flex()
-            .gap_3()
-            .child(
-                div()
-                    .w_16()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(self.label),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .child(value.clone()),
-            )
-            .child(
-                Button::new(self.id)
-                    .ghost()
-                    .icon(IconName::Copy)
-                    .tooltip("复制")
-                    .on_click(move |_, window, cx| {
-                        window.push_notification(clipboard_copy(&*value), cx);
-                    }),
-            )
-    }
-}
-
-#[derive(IntoElement)]
-struct ProtocolPanel {
-    protocols: Option<ProtocolSet>,
-    panel: WeakEntity<BroadcastPanel>,
-    stopping: bool,
-}
-
-impl RenderOnce for ProtocolPanel {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let details = if let Some(protocols) = self.protocols {
-            let panel = self.panel.clone();
-
-            let protocol = protocols.active();
-            v_flex()
-                .child(
-                    TabBar::new("protocols")
-                        .underline()
-                        .selected_index(protocols.active)
-                        .on_click(move |index: &usize, _, cx| {
-                            let _ = panel.update(cx, |this, cx| {
-                                this.select_protocol(*index);
-                                cx.notify();
-                            });
-                        })
-                        .children(
-                            protocols
-                                .items
-                                .iter()
-                                .map(|protocol| Tab::new().label(protocol.name.to_string())),
-                        ),
-                )
-                .child(
-                    v_flex()
-                        .gap_4()
-                        .p_4()
-                        .child(ProtocolLine {
-                            id: "copy-address",
-                            label: "服务器",
-                            value: protocol.addr.as_str().into(),
-                        })
-                        .child(ProtocolLine {
-                            id: "copy-code",
-                            label: "推流码",
-                            value: protocol.code.as_str().into(),
-                        }),
-                )
-                .into_any_element()
-        } else {
-            div()
-                .p_4()
-                .text_color(cx.theme().muted_foreground)
-                .child("当前直播不是由本次会话启动，无法恢复推流码")
-                .into_any_element()
-        };
-        let panel = self.panel;
-        v_flex().gap_5().child(details).child(
-            Button::new("stop")
-                .danger()
-                .icon(IconName::Close)
-                .label("结束直播")
-                .loading(self.stopping)
-                .on_click(move |_, window, cx| {
-                    let _ = panel.update(cx, |this, cx| this.stop(window, cx));
-                }),
-        )
-    }
+    _subscriptions: Vec<Subscription>,
 }
 
 impl BroadcastPanel {
     pub fn new(user_id: u64, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(|cx| RoomEditor::new(user_id, window, cx));
-        let mut this = Self {
-            user_id,
-            editor: editor.clone(),
-            state: BroadcastState::Offline,
-            subscriptions: Vec::new(),
-        };
-        this.subscriptions.push(cx.subscribe_in(
+        let subscription = cx.subscribe_in(
             &editor,
             window,
             |this, _, event: &RoomEditorEvent, _, cx| {
@@ -248,8 +74,13 @@ impl BroadcastPanel {
                     cx.notify();
                 }
             },
-        ));
-        this
+        );
+        Self {
+            user_id,
+            editor: editor.clone(),
+            state: BroadcastState::Offline,
+            _subscriptions: vec![subscription],
+        }
     }
 
     fn set_editor_locked(&self, locked: bool, cx: &mut Context<Self>) {
@@ -432,5 +263,173 @@ impl Render for BroadcastPanel {
                     .child(format!("房间号：{room}")),
             )
             .child(content)
+    }
+}
+
+#[derive(IntoElement)]
+struct FaceVerificationContent {
+    qr: Arc<Image>,
+}
+
+impl RenderOnce for FaceVerificationContent {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        DialogContent::new()
+            .v_flex()
+            .items_center()
+            .gap_4()
+            .child("请使用 B 站 APP 扫码完成人脸验证")
+            .child(img(self.qr).size_64())
+    }
+}
+
+#[derive(IntoElement)]
+struct FaceVerificationActions {
+    panel: WeakEntity<BroadcastPanel>,
+}
+
+impl RenderOnce for FaceVerificationActions {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        DialogFooter::new().child(
+            Button::new("verified")
+                .primary()
+                .label("我已完成验证")
+                .on_click(move |_, window, cx| {
+                    window.close_dialog(cx);
+                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
+                }),
+        )
+    }
+}
+
+#[derive(IntoElement)]
+struct BroadcastSetup {
+    editor: Entity<RoomEditor>,
+    panel: WeakEntity<BroadcastPanel>,
+    starting: bool,
+    awaiting_verification: bool,
+}
+
+impl RenderOnce for BroadcastSetup {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        v_flex().gap_5().child(self.editor).child(
+            Button::new("start")
+                .primary()
+                .icon(IconName::Play)
+                .label(if self.awaiting_verification {
+                    "重新验证"
+                } else {
+                    "开始直播"
+                })
+                .loading(self.starting)
+                .on_click(move |_, window, cx| {
+                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
+                }),
+        )
+    }
+}
+
+#[derive(IntoElement)]
+struct ProtocolLine {
+    id: &'static str,
+    label: &'static str,
+    value: SharedString,
+}
+
+impl RenderOnce for ProtocolLine {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let value = self.value;
+        h_flex()
+            .gap_3()
+            .child(
+                div()
+                    .w_16()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.label),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(value.clone()),
+            )
+            .child(
+                Button::new(self.id)
+                    .ghost()
+                    .icon(IconName::Copy)
+                    .tooltip("复制")
+                    .on_click(move |_, window, cx| {
+                        window.push_notification(clipboard_copy(&*value), cx);
+                    }),
+            )
+    }
+}
+
+#[derive(IntoElement)]
+struct ProtocolPanel {
+    protocols: Option<ProtocolSet>,
+    panel: WeakEntity<BroadcastPanel>,
+    stopping: bool,
+}
+
+impl RenderOnce for ProtocolPanel {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let details = if let Some(protocols) = self.protocols {
+            let panel = self.panel.clone();
+
+            let protocol = protocols.active();
+            v_flex()
+                .child(
+                    TabBar::new("protocols")
+                        .underline()
+                        .selected_index(protocols.active)
+                        .on_click(move |index: &usize, _, cx| {
+                            let _ = panel.update(cx, |this, cx| {
+                                this.select_protocol(*index);
+                                cx.notify();
+                            });
+                        })
+                        .children(
+                            protocols
+                                .items
+                                .iter()
+                                .map(|protocol| Tab::new().label(protocol.name.to_string())),
+                        ),
+                )
+                .child(
+                    v_flex()
+                        .gap_4()
+                        .p_4()
+                        .child(ProtocolLine {
+                            id: "copy-address",
+                            label: "服务器",
+                            value: protocol.addr.as_str().into(),
+                        })
+                        .child(ProtocolLine {
+                            id: "copy-code",
+                            label: "推流码",
+                            value: protocol.code.as_str().into(),
+                        }),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .p_4()
+                .text_color(cx.theme().muted_foreground)
+                .child("当前直播不是由本次会话启动，无法恢复推流码")
+                .into_any_element()
+        };
+        let panel = self.panel;
+        v_flex().gap_5().child(details).child(
+            Button::new("stop")
+                .danger()
+                .icon(IconName::Close)
+                .label("结束直播")
+                .loading(self.stopping)
+                .on_click(move |_, window, cx| {
+                    let _ = panel.update(cx, |this, cx| this.stop(window, cx));
+                }),
+        )
     }
 }

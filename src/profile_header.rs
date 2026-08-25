@@ -6,18 +6,20 @@ use gpui_component::{
     h_flex,
 };
 
+type LogoutHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
 #[derive(IntoElement)]
 pub struct ProfileHeader {
     name: SharedString,
     avatar: ImageSource,
-    on_logout: Box<dyn Fn(&mut Window, &mut App)>,
+    on_logout: LogoutHandler,
 }
 
 impl ProfileHeader {
     pub fn new(
         name: SharedString,
         avatar: ImageSource,
-        on_logout: impl Fn(&mut Window, &mut App) + 'static,
+        on_logout: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             name,
@@ -43,7 +45,7 @@ impl RenderOnce for ProfileHeader {
                     .ghost()
                     .icon(IconName::Close)
                     .label("退出登录")
-                    .on_click(move |_, window, cx| on_logout(window, cx)),
+                    .on_click(on_logout),
             )
             .child(
                 Button::new("theme")
