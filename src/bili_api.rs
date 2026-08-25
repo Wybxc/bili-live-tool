@@ -1,31 +1,18 @@
-use std::sync::{Arc, LazyLock};
+use std::{collections::HashMap, sync::LazyLock};
 
-use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use serde_aux::field_attributes::deserialize_number_from_string;
 use smol_str::SmolStr;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] ureq::Error),
     #[error("Failed to parse API response: {0}")]
     Parse(#[from] serde_json::Error),
-    #[error("Middleware error: {0}")]
-    Middleware(anyhow::Error),
     #[error("API error: code {code}, message: {message}")]
     Api { code: i32, message: SmolStr },
     #[error("Empty payload")]
     EmptyPayload,
-}
-
-impl From<reqwest_middleware::Error> for Error {
-    fn from(err: reqwest_middleware::Error) -> Self {
-        use reqwest_middleware::Error::*;
-        match err {
-            Middleware(error) => Error::Middleware(error),
-            Reqwest(error) => Error::Http(error),
-        }
-    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -40,18 +27,16 @@ pub struct Response<T> {
 
 impl<T> Response<T> {
     pub fn into_data(self) -> Result<T> {
-        if self.code == 0 {
-            if let Some(data) = self.data {
-                Ok(data)
-            } else {
-                Err(Error::EmptyPayload)
-            }
-        } else {
-            Err(Error::Api {
+        if self.code != 0 {
+            return Err(Error::Api {
                 code: self.code,
                 message: self.message,
-            })
+            });
         }
+        let Some(data) = self.data else {
+            return Err(Error::EmptyPayload);
+        };
+        Ok(data)
     }
 }
 
@@ -65,11 +50,9 @@ pub struct GeneratePassportQrcode {
     pub qrcode_key: SmolStr,
 }
 
-pub async fn generate_passport_qrcode() -> Result<GeneratePassportQrcode> {
+pub fn generate_passport_qrcode() -> Result<GeneratePassportQrcode> {
     const URL: &str = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate";
-    let client = client();
-    let response = client.get(URL).send().await?;
-    let response = response.text().await?;
+    let response = get(URL)?;
     let json: Response<GeneratePassportQrcode> = serde_json::from_str(&response)?;
     tracing::info!(
         "Generated Passport QR code with URL: {}",
@@ -122,11 +105,9 @@ pub enum PollPassportQrcodeStatusCode {
     Unknown,
 }
 
-pub async fn poll_passport_qrcode_status(key: &str) -> Result<PollPassportQrcodeStatus> {
+pub fn poll_passport_qrcode_status(key: &str) -> Result<PollPassportQrcodeStatus> {
     const URL: &str = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll";
-    let client = client();
-    let response = client.get(URL).query(&[("qrcode_key", key)]).send().await?;
-    let response = response.text().await?;
+    let response = response_text(client().get(URL).query("qrcode_key", key).call()?)?;
     let json: Response<PollPassportQrcodeStatus> = serde_json::from_str(&response)?;
     tracing::info!(
         "Polled Passport QR code status: code {:?}, message {}",
@@ -244,11 +225,9 @@ pub struct NavUserInfo {
     pub mid: u64,
 }
 
-pub async fn get_nav_user_info() -> Result<NavUserInfo> {
+pub fn get_nav_user_info() -> Result<NavUserInfo> {
     const URL: &str = "https://api.bilibili.com/x/web-interface/nav";
-    let client = client();
-    let response = client.get(URL).send().await?;
-    let response = response.text().await?;
+    let response = get(URL)?;
     let json: Response<NavUserInfo> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched nav user info: is_login={}, uname={}",
@@ -406,11 +385,9 @@ pub struct RoomId {
     pub room_id: u64,
 }
 
-pub async fn get_room_id(user_id: u64) -> Result<RoomId> {
+pub fn get_room_id(user_id: u64) -> Result<RoomId> {
     const URL: &str = "https://api.live.bilibili.com/room/v2/Room/room_id_by_uid";
-    let client = client();
-    let response = client.get(URL).query(&[("uid", user_id)]).send().await?;
-    let response = response.text().await?;
+    let response = response_text(client().get(URL).query("uid", user_id.to_string()).call()?)?;
     let json: Response<RoomId> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched room ID: {}",
@@ -455,15 +432,14 @@ pub enum LiveStatus {
     Unknown,
 }
 
-pub async fn get_room_info(room_id: u64) -> Result<RoomInfo> {
+pub fn get_room_info(room_id: u64) -> Result<RoomInfo> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/get_info";
-    let client = client();
-    let response = client
-        .get(URL)
-        .query(&[("room_id", room_id)])
-        .send()
-        .await?;
-    let response = response.text().await?;
+    let response = response_text(
+        client()
+            .get(URL)
+            .query("room_id", room_id.to_string())
+            .call()?,
+    )?;
     let json: Response<RoomInfo> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched room info for room_id {}: title='{}', area_id={}, parent_area_id={}",
@@ -601,11 +577,9 @@ pub struct SubArea {
     pub name: SmolStr,
 }
 
-pub async fn get_live_area_list() -> Result<Vec<Area>> {
+pub fn get_live_area_list() -> Result<Vec<Area>> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Area/getList";
-    let client = client();
-    let response = client.get(URL).send().await?;
-    let response = response.text().await?;
+    let response = get(URL)?;
     let json: Response<Vec<Area>> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched area list with {} areas",
@@ -687,15 +661,13 @@ fn deserialize_area_list() {
     assert_eq!(area.list[2].name, "绝地求生");
 }
 
-pub async fn update_room_info(
+pub fn update_room_info(
     room_id: u64,
     title: Option<&str>,
     area_id: Option<u64>,
     csrf: &str,
 ) -> Result<()> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/update";
-    let client = client();
-
     let room_id = room_id.to_string();
     let area_id = area_id.map(|id| id.to_string());
     let mut params = vec![
@@ -711,8 +683,7 @@ pub async fn update_room_info(
         params.push(("area_id", area_id.as_str()));
     }
 
-    let response = client.post(URL).form(&params).send().await?;
-    let response = response.text().await?;
+    let response = response_text(client().post(URL).send_form(params)?)?;
     let json: Response<NoneData> = serde_json::from_str(&response)?;
     tracing::info!(
         "Updated room info for room_id {}: title={}, area_id={}",
@@ -731,11 +702,9 @@ pub struct Timpstamp {
     pub now: u64,
 }
 
-pub async fn get_timestamp() -> Result<u64> {
+pub fn get_timestamp() -> Result<u64> {
     const URL: &str = "https://api.bilibili.com/x/report/click/now";
-    let client = client();
-    let response = client.get(URL).send().await?;
-    let response = response.text().await?;
+    let response = get(URL)?;
     let json: Response<Timpstamp> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched timestamp: {}",
@@ -769,19 +738,18 @@ pub struct LiveVersion {
     pub build: u64,
 }
 
-pub async fn get_live_version(timestamp: u64) -> Result<LiveVersion> {
+pub fn get_live_version(timestamp: u64) -> Result<LiveVersion> {
     const URL: &str =
         "https://api.live.bilibili.com/xlive/app-blink/v1/liveVersionInfo/getHomePageLiveVersion";
-    let client = client();
-    let response = client
-        .get(URL)
-        .query(&app_sign(vec![
-            ("system_version", 2.into()),
-            ("ts", timestamp.into()),
-        ]))
-        .send()
-        .await?;
-    let response = response.text().await?;
+    let params = string_params(app_sign(vec![
+        ("system_version", 2.into()),
+        ("ts", timestamp.into()),
+    ]));
+    let mut request = client().get(URL);
+    for (key, value) in &params {
+        request = request.query(key, value);
+    }
+    let response = response_text(request.call()?)?;
     let json: Response<LiveVersion> = serde_json::from_str(&response)?;
     tracing::info!(
         "Fetched live version: {} (build {})",
@@ -842,7 +810,7 @@ pub struct Protocol {
     pub code: SmolStr,
 }
 
-pub async fn start_live(
+pub fn start_live(
     room_id: u64,
     area_id: u64,
     csrf: &str,
@@ -850,23 +818,18 @@ pub async fn start_live(
     timestamp: u64,
 ) -> Result<Response<StartLiveResponse>> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/startLive";
-    let client = client();
-    let response = client
-        .post(URL)
-        .form(&app_sign(vec![
-            ("room_id", room_id.into()),
-            ("area_v2", area_id.into()),
-            ("platform", "pc_link".into()),
-            ("backup_stream", "0".into()),
-            ("csrf_token", csrf.to_string().into()),
-            ("csrf", csrf.to_string().into()),
-            ("build", version.build.into()),
-            ("version", version.curr_version.to_string().into()),
-            ("ts", timestamp.into()),
-        ]))
-        .send()
-        .await?;
-    let response = response.text().await?;
+    let params = string_params(app_sign(vec![
+        ("room_id", room_id.into()),
+        ("area_v2", area_id.into()),
+        ("platform", "pc_link".into()),
+        ("backup_stream", "0".into()),
+        ("csrf_token", csrf.to_string().into()),
+        ("csrf", csrf.to_string().into()),
+        ("build", version.build.into()),
+        ("version", version.curr_version.to_string().into()),
+        ("ts", timestamp.into()),
+    ]));
+    let response = response_text(client().post(URL).send_form(params)?)?;
     let response: Response<StartLiveResponse> = serde_json::from_str(&response)?;
     tracing::info!(
         "Started live stream: RTMP addr {}, code {}, {} protocol(s) available",
@@ -1006,19 +969,14 @@ fn deserialize_start_live_response() {
     assert_eq!(data.change, 0);
 }
 
-pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
+pub fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
     const URL: &str = "https://api.live.bilibili.com/room/v1/Room/stopLive";
-    let client = client();
-    let response = client
-        .post(URL)
-        .form(&[
-            ("platform", "pc_link"),
-            ("room_id", room_id.to_string().as_str()),
-            ("csrf", csrf),
-        ])
-        .send()
-        .await?;
-    let response = response.text().await?;
+    let room_id_text = room_id.to_string();
+    let response = response_text(client().post(URL).send_form([
+        ("platform", "pc_link"),
+        ("room_id", room_id_text.as_str()),
+        ("csrf", csrf),
+    ])?)?;
     let json: Response<NoneData> = serde_json::from_str(&response)?;
     tracing::info!(
         "Stopped live stream for room_id {}: code {}, message {}",
@@ -1028,6 +986,132 @@ pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
     );
     json.into_data()?;
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub struct StreamProtocol {
+    pub name: SmolStr,
+    pub addr: SmolStr,
+    pub code: SmolStr,
+}
+
+pub enum StartLiveOutcome {
+    Started(Vec<StreamProtocol>),
+    FaceVerification(SmolStr),
+}
+
+pub fn update_live_room(
+    room_id: u64,
+    title: Option<&str>,
+    area_id: Option<u64>,
+) -> anyhow::Result<()> {
+    let csrf = get_csrf_token().ok_or_else(|| anyhow::anyhow!("无法读取 CSRF Token"))?;
+    update_room_info(room_id, title, area_id, &csrf)?;
+    Ok(())
+}
+
+pub fn start_live_session(
+    room_id: u64,
+    user_id: u64,
+    title: &str,
+    area_id: u64,
+) -> anyhow::Result<StartLiveOutcome> {
+    let csrf = get_csrf_token().ok_or_else(|| anyhow::anyhow!("无法读取 CSRF Token"))?;
+    update_room_info(room_id, Some(title), Some(area_id), &csrf)?;
+    let timestamp = get_timestamp()?;
+    let version = get_live_version(timestamp)?;
+    let response = start_live(room_id, area_id, &csrf, version, timestamp)?;
+
+    if response.code == 60024 || response.code == 60043 {
+        let url = response
+            .data
+            .and_then(|data| data.qr)
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| {
+                format!("https://www.bilibili.com/blackboard/live/face-auth-middle.html?source_event=400&mid={user_id}").into()
+            });
+        return Ok(StartLiveOutcome::FaceVerification(url));
+    }
+    if response.code != 0 {
+        return Err(anyhow::anyhow!(response.message.to_string()));
+    }
+
+    let data = response.data.ok_or(Error::EmptyPayload)?;
+    let protocols = collect_stream_protocols(data);
+    Ok(StartLiveOutcome::Started(protocols))
+}
+
+fn collect_stream_protocols(data: StartLiveResponse) -> Vec<StreamProtocol> {
+    let mut protocols = vec![StreamProtocol {
+        name: "RTMP".into(),
+        addr: data.rtmp.addr,
+        code: data.rtmp.code,
+    }];
+    for protocol in data.protocols.into_iter().flatten() {
+        protocols.push(StreamProtocol {
+            name: protocol.protocol.to_uppercase().into(),
+            addr: protocol.addr,
+            code: protocol.code,
+        });
+    }
+    protocols.retain(|protocol| !protocol.addr.is_empty() && !protocol.code.is_empty());
+    dedupe_protocol_names(&mut protocols);
+    protocols
+}
+
+#[cfg(test)]
+#[test]
+fn incomplete_stream_protocols_do_not_hide_valid_credentials() {
+    let protocols = collect_stream_protocols(StartLiveResponse {
+        rtmp: Rtmp {
+            addr: "rtmp://primary/".into(),
+            code: "primary-code".into(),
+        },
+        protocols: Some(vec![
+            Protocol {
+                protocol: "rtmp".into(),
+                addr: "".into(),
+                code: "".into(),
+            },
+            Protocol {
+                protocol: "srt".into(),
+                addr: "srt://backup/".into(),
+                code: "backup-code".into(),
+            },
+        ]),
+        ..Default::default()
+    });
+
+    assert_eq!(protocols.len(), 2);
+    assert_eq!(protocols[0].name, "RTMP");
+    assert_eq!(protocols[0].addr, "rtmp://primary/");
+    assert_eq!(protocols[1].name, "SRT");
+    assert!(
+        protocols
+            .iter()
+            .all(|protocol| !protocol.addr.is_empty() && !protocol.code.is_empty())
+    );
+}
+
+pub fn stop_live_session(room_id: u64) -> anyhow::Result<()> {
+    let csrf = get_csrf_token().ok_or_else(|| anyhow::anyhow!("无法读取 CSRF Token"))?;
+    stop_live(room_id, &csrf)?;
+    Ok(())
+}
+
+fn dedupe_protocol_names(protocols: &mut [StreamProtocol]) {
+    let mut totals = HashMap::new();
+    for protocol in protocols.iter() {
+        *totals.entry(protocol.name.clone()).or_insert(0usize) += 1;
+    }
+    let mut seen = HashMap::new();
+    for protocol in protocols {
+        if totals[&protocol.name] > 1 {
+            let count = seen.entry(protocol.name.clone()).or_insert(0usize);
+            *count += 1;
+            protocol.name = format!("{} {}", protocol.name, count).into();
+        }
+    }
 }
 
 pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_json::Value)> {
@@ -1047,36 +1131,29 @@ pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_
     params
 }
 
-pub static COOKIE_STORE: LazyLock<Arc<CookieStoreMutex>> = LazyLock::new(|| {
-    let store = load_cookies()
-        .inspect_err(|e| tracing::error!("Failed to load cookies: {e}"))
-        .unwrap_or_default();
-    Arc::new(CookieStoreMutex::new(store))
-});
-
 const SERVICE: &str = "bili-live-tool";
 const ENTRY: &str = "cookies";
 
-fn load_cookies() -> anyhow::Result<CookieStore> {
+fn load_cookies(agent: &ureq::Agent) -> anyhow::Result<()> {
     let entry = keyring::Entry::new(SERVICE, ENTRY)?;
     let password = entry.get_password()?;
-    let store = cookie_store::serde::json::load(std::io::Cursor::new(password))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    Ok(store)
+    agent
+        .cookie_jar_lock()
+        .load_json(std::io::Cursor::new(password))?;
+    Ok(())
 }
 
 pub fn save_cookies() -> anyhow::Result<()> {
     let entry = keyring::Entry::new(SERVICE, ENTRY)?;
     let mut buf = Vec::new();
-    let store = COOKIE_STORE.lock().unwrap();
-    cookie_store::serde::json::save(&store, &mut buf).map_err(|e| anyhow::anyhow!("{e}"))?;
+    client().cookie_jar_lock().save_json(&mut buf)?;
     entry
         .set_password(std::str::from_utf8(&buf)?)
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 pub fn clear_cookies() -> anyhow::Result<()> {
-    COOKIE_STORE.lock().unwrap().clear();
+    client().cookie_jar_lock().clear();
     let entry = keyring::Entry::new(SERVICE, ENTRY)?;
     entry
         .delete_credential()
@@ -1084,26 +1161,45 @@ pub fn clear_cookies() -> anyhow::Result<()> {
 }
 
 pub fn get_csrf_token() -> Option<SmolStr> {
-    let store = COOKIE_STORE.lock().unwrap();
-    store
-        .iter_any()
-        .find(|c| c.name() == "bili_jct")
-        .map(|c| c.value().into())
+    client()
+        .cookie_jar_lock()
+        .iter()
+        .find(|cookie| cookie.name() == "bili_jct")
+        .map(|cookie| cookie.value().into())
 }
 
-fn client() -> reqwest_middleware::ClientWithMiddleware {
-    static CLIENT: LazyLock<reqwest_middleware::ClientWithMiddleware> = LazyLock::new(|| {
-        let client = reqwest::Client::builder()
+fn client() -> &'static ureq::Agent {
+    static CLIENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
+        let config = ureq::Agent::config_builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-            .no_proxy() // TODO: make this configurable
-            .cookie_provider(COOKIE_STORE.clone())
-            .build()
-            .unwrap();
-
-        reqwest_middleware::ClientBuilder::new(client)
-            .with(reqwest_tracing::TracingMiddleware::default())
-            .build()
+            .proxy(None)
+            .build();
+        let agent = ureq::Agent::new_with_config(config);
+        if let Err(error) = load_cookies(&agent) {
+            tracing::debug!("No saved cookies loaded: {error}");
+        }
+        agent
     });
+    &CLIENT
+}
 
-    CLIENT.clone()
+fn get(url: &str) -> Result<String> {
+    response_text(client().get(url).call()?)
+}
+
+fn response_text(mut response: ureq::http::Response<ureq::Body>) -> Result<String> {
+    Ok(response.body_mut().read_to_string()?)
+}
+
+fn string_params(params: Vec<(&str, serde_json::Value)>) -> Vec<(String, String)> {
+    params
+        .into_iter()
+        .map(|(key, value)| {
+            let value = value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string());
+            (key.to_owned(), value)
+        })
+        .collect()
 }
