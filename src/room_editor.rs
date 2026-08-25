@@ -77,7 +77,44 @@ impl RoomEditor {
         let title = cx.new(|cx| InputState::new(window, cx).placeholder("请输入直播标题"));
         let area = cx.new(|cx| SelectState::new(vec![], None, window, cx));
         let sub = cx.new(|cx| SelectState::new(vec![], None, window, cx));
-        let mut this = Self {
+        let area_subscription = cx.subscribe_in(
+            &area,
+            window,
+            |this, _, SelectEvent::Confirm(value), window, cx| {
+                this.select_parent(value.as_ref(), window, cx);
+                cx.notify();
+            },
+        );
+        let sub_subscription = cx.subscribe_in(
+            &sub,
+            window,
+            |this, _, SelectEvent::Confirm(value), _, cx| {
+                this.select_sub(value.as_ref());
+                cx.notify();
+            },
+        );
+        cx.spawn_in(window, async move |weak, cx| {
+            match cx
+                .background_spawn(async { bili_api::get_live_area_list() })
+                .await
+                .map(Arc::new)
+            {
+                Ok(areas) => {
+                    weak_update_in(cx, &weak, |this, window, cx| {
+                        this.install_areas(areas, window, cx)
+                    });
+                }
+                Err(error) => {
+                    weak_update_in(cx, &weak, |this, window, cx| {
+                        this.areas = AreaState::Failed;
+                        this.notify(format!("分区列表加载失败：{error}"), window, cx);
+                    });
+                }
+            }
+            Self::load_room(weak, user_id, cx).await;
+        })
+        .detach();
+        Self {
             room: RoomState::Loading,
             areas: AreaState::Loading,
             title,
@@ -85,22 +122,8 @@ impl RoomEditor {
             sub: sub.clone(),
             update: UpdateState::Idle,
             broadcast_locked: false,
-            _subscriptions: Vec::new(),
-        };
-        this._subscriptions.push(
-            cx.subscribe_in(&area, window, |this, _, event, window, cx| {
-                let SelectEvent::Confirm(value) = event;
-                this.select_parent(value.as_ref(), window, cx);
-            }),
-        );
-        this._subscriptions
-            .push(cx.subscribe_in(&sub, window, |this, _, event, _, cx| {
-                let SelectEvent::Confirm(value) = event;
-                this.select_sub(value.as_ref());
-                cx.notify();
-            }));
-        this.initialize(user_id, window, cx);
-        this
+            _subscriptions: vec![area_subscription, sub_subscription],
+        }
     }
 
     pub fn start_request(&self, cx: &App) -> anyhow::Result<StartLiveRequest> {
@@ -125,30 +148,6 @@ impl RoomEditor {
             RoomState::Ready(room_id) => room_id.to_string().into(),
             RoomState::Failed => "获取失败".into(),
         }
-    }
-
-    fn initialize(&mut self, user_id: u64, window: &mut Window, cx: &mut Context<Self>) {
-        cx.spawn_in(window, async move |weak, cx| {
-            match cx
-                .background_spawn(async { bili_api::get_live_area_list() })
-                .await
-                .map(Arc::new)
-            {
-                Ok(areas) => {
-                    weak_update_in(cx, &weak, |this, window, cx| {
-                        this.install_areas(areas, window, cx)
-                    });
-                }
-                Err(error) => {
-                    weak_update_in(cx, &weak, |this, window, cx| {
-                        this.areas = AreaState::Failed;
-                        this.notify(format!("分区列表加载失败：{error}"), window, cx);
-                    });
-                }
-            }
-            Self::load_room(weak, user_id, cx).await;
-        })
-        .detach();
     }
 
     async fn load_room(weak: WeakEntity<Self>, user_id: u64, cx: &mut AsyncWindowContext) {
@@ -290,7 +289,6 @@ impl RoomEditor {
             state.set_items(names, window, cx);
             state.set_selected_index(selection.map(|_| IndexPath::default().row(0)), window, cx);
         });
-        cx.notify();
     }
 
     fn select_sub(&mut self, name: Option<&SharedString>) {

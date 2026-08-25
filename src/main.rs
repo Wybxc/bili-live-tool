@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::Arc;
+
 mod bili_api;
 mod broadcast_panel;
 mod dashboard;
 mod login_page;
 mod profile_header;
 mod room_editor;
+mod ureq_http_client;
 mod utils;
 
 use gpui::*;
@@ -97,11 +100,17 @@ impl Render for AppView {
 
 fn main() {
     tracing_subscriber::fmt::init();
-    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    let app = gpui_platform::application()
+        .with_assets(gpui_component_assets::Assets)
+        .with_http_client(Arc::new(ureq_http_client::UreqHttpClient::new()));
     app.run(|cx| {
         gpui_component::init(cx);
+        let window_options = WindowOptions {
+            window_bounds: Some(WindowBounds::centered(size(px(720.), px(560.)), cx)),
+            ..Default::default()
+        };
         cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |w, cx| {
+            cx.open_window(window_options, |w, cx| {
                 w.set_window_title("Bili Live Tool");
                 let view = cx.new(|cx| AppView::new(w, cx));
                 cx.new(|cx| Root::new(view, w, cx).bg(cx.theme().background))

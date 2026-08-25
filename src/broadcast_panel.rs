@@ -24,11 +24,7 @@ struct ProtocolSet {
 
 impl ProtocolSet {
     fn new(protocols: Vec<StreamProtocol>) -> Option<Self> {
-        (!protocols.is_empty()
-            && protocols
-                .iter()
-                .all(|protocol| !protocol.addr.is_empty() && !protocol.code.is_empty()))
-        .then(|| Self {
+        (!protocols.is_empty()).then(|| Self {
             items: protocols.into_boxed_slice(),
             active: 0,
         })
@@ -176,27 +172,30 @@ impl RenderOnce for ProtocolPanel {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let details = if let Some(protocols) = self.protocols {
             let panel = self.panel.clone();
-            let tabs = protocols.items.iter().fold(
-                TabBar::new("protocols")
-                    .selected_index(protocols.active)
-                    .on_click(move |index: &usize, _, cx| {
-                        let _ = panel.update(cx, |this, cx| {
-                            this.select_protocol(*index);
-                            cx.notify();
-                        });
-                    }),
-                |tabs, protocol| tabs.child(Tab::new().label(protocol.name.to_string())),
-            );
+
             let protocol = protocols.active();
             v_flex()
-                .child(tabs)
+                .child(
+                    TabBar::new("protocols")
+                        .underline()
+                        .selected_index(protocols.active)
+                        .on_click(move |index: &usize, _, cx| {
+                            let _ = panel.update(cx, |this, cx| {
+                                this.select_protocol(*index);
+                                cx.notify();
+                            });
+                        })
+                        .children(
+                            protocols
+                                .items
+                                .iter()
+                                .map(|protocol| Tab::new().label(protocol.name.to_string())),
+                        ),
+                )
                 .child(
                     v_flex()
                         .gap_4()
                         .p_4()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .rounded_b_lg()
                         .child(ProtocolLine {
                             id: "copy-address",
                             label: "服务器",

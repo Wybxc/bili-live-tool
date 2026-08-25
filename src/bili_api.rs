@@ -1037,6 +1037,11 @@ pub fn start_live_session(
     }
 
     let data = response.data.ok_or(Error::EmptyPayload)?;
+    let protocols = collect_stream_protocols(data);
+    Ok(StartLiveOutcome::Started(protocols))
+}
+
+fn collect_stream_protocols(data: StartLiveResponse) -> Vec<StreamProtocol> {
     let mut protocols = vec![StreamProtocol {
         name: "RTMP".into(),
         addr: data.rtmp.addr,
@@ -1049,8 +1054,43 @@ pub fn start_live_session(
             code: protocol.code,
         });
     }
+    protocols.retain(|protocol| !protocol.addr.is_empty() && !protocol.code.is_empty());
     dedupe_protocol_names(&mut protocols);
-    Ok(StartLiveOutcome::Started(protocols))
+    protocols
+}
+
+#[cfg(test)]
+#[test]
+fn incomplete_stream_protocols_do_not_hide_valid_credentials() {
+    let protocols = collect_stream_protocols(StartLiveResponse {
+        rtmp: Rtmp {
+            addr: "rtmp://primary/".into(),
+            code: "primary-code".into(),
+        },
+        protocols: Some(vec![
+            Protocol {
+                protocol: "rtmp".into(),
+                addr: "".into(),
+                code: "".into(),
+            },
+            Protocol {
+                protocol: "srt".into(),
+                addr: "srt://backup/".into(),
+                code: "backup-code".into(),
+            },
+        ]),
+        ..Default::default()
+    });
+
+    assert_eq!(protocols.len(), 2);
+    assert_eq!(protocols[0].name, "RTMP");
+    assert_eq!(protocols[0].addr, "rtmp://primary/");
+    assert_eq!(protocols[1].name, "SRT");
+    assert!(
+        protocols
+            .iter()
+            .all(|protocol| !protocol.addr.is_empty() && !protocol.code.is_empty())
+    );
 }
 
 pub fn stop_live_session(room_id: u64) -> anyhow::Result<()> {

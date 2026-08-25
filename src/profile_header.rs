@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use gpui::*;
 use gpui_component::{
     ActiveTheme, IconName, Sizable, ThemeMode,
@@ -8,55 +6,34 @@ use gpui_component::{
     h_flex,
 };
 
-use crate::{login_page::UserSession, utils::weak_update};
-
-pub enum ProfileHeaderEvent {
-    Logout,
-}
-
-enum AvatarState {
-    Loading,
-    Ready(Arc<Image>),
-    Failed,
-}
-
+#[derive(IntoElement)]
 pub struct ProfileHeader {
     name: SharedString,
-    avatar: AvatarState,
+    avatar: ImageSource,
+    on_logout: Box<dyn Fn(&mut Window, &mut App)>,
 }
 
-impl EventEmitter<ProfileHeaderEvent> for ProfileHeader {}
-
 impl ProfileHeader {
-    pub fn new(session: &UserSession, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let this = Self {
-            name: session.name.clone(),
-            avatar: AvatarState::Loading,
-        };
-        let face_url = session.face_url.clone();
-        cx.spawn_in(window, async move |weak, cx| {
-            let avatar = match cx
-                .background_spawn(async move { load_avatar(&face_url) })
-                .await
-            {
-                Ok(image) => AvatarState::Ready(image),
-                Err(_) => AvatarState::Failed,
-            };
-            weak_update(cx, &weak, |this, _| this.avatar = avatar);
-        })
-        .detach();
-        this
+    pub fn new(
+        name: SharedString,
+        avatar: ImageSource,
+        on_logout: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            name,
+            avatar,
+            on_logout: Box::new(on_logout),
+        }
     }
 }
 
-impl Render for ProfileHeader {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let avatar = match &self.avatar {
-            AvatarState::Ready(image) => Avatar::new().src(image.clone()).large(),
-            AvatarState::Loading | AvatarState::Failed => {
-                Avatar::new().name(self.name.clone()).large()
-            }
-        };
+impl RenderOnce for ProfileHeader {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let avatar = Avatar::new()
+            .src(self.avatar.clone())
+            .name(self.name.clone())
+            .large();
+        let on_logout = self.on_logout;
         h_flex()
             .gap_3()
             .child(avatar)
@@ -66,7 +43,7 @@ impl Render for ProfileHeader {
                     .ghost()
                     .icon(IconName::Close)
                     .label("退出登录")
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ProfileHeaderEvent::Logout))),
+                    .on_click(move |_, window, cx| on_logout(window, cx)),
             )
             .child(
                 Button::new("theme")
@@ -83,10 +60,4 @@ impl Render for ProfileHeader {
                     }),
             )
     }
-}
-
-fn load_avatar(url: &str) -> anyhow::Result<Arc<Image>> {
-    let mut response = ureq::get(url).call()?;
-    let bytes = response.body_mut().read_to_vec()?;
-    Ok(Arc::new(Image::from_bytes(ImageFormat::Png, bytes)))
 }
