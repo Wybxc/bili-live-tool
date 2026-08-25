@@ -1,4 +1,7 @@
-use std::sync::{Arc, LazyLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
 
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use serde_aux::field_attributes::deserialize_number_from_string;
@@ -40,18 +43,16 @@ pub struct Response<T> {
 
 impl<T> Response<T> {
     pub fn into_data(self) -> Result<T> {
-        if self.code == 0 {
-            if let Some(data) = self.data {
-                Ok(data)
-            } else {
-                Err(Error::EmptyPayload)
-            }
-        } else {
-            Err(Error::Api {
+        if self.code != 0 {
+            return Err(Error::Api {
                 code: self.code,
                 message: self.message,
-            })
+            });
         }
+        let Some(data) = self.data else {
+            return Err(Error::EmptyPayload);
+        };
+        Ok(data)
     }
 }
 
@@ -1028,6 +1029,92 @@ pub async fn stop_live(room_id: u64, csrf: &str) -> Result<()> {
     );
     json.into_data()?;
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub struct StreamProtocol {
+    pub name: SmolStr,
+    pub addr: SmolStr,
+    pub code: SmolStr,
+}
+
+pub enum StartLiveOutcome {
+    Started(Vec<StreamProtocol>),
+    FaceVerification(SmolStr),
+}
+
+pub async fn update_live_room(
+    room_id: u64,
+    title: Option<&str>,
+    area_id: Option<u64>,
+) -> anyhow::Result<()> {
+    let csrf = get_csrf_token().ok_or_else(|| anyhow::anyhow!("无法读取 CSRF Token"))?;
+    update_room_info(room_id, title, area_id, &csrf).await?;
+    Ok(())
+}
+
+pub async fn start_live_session(
+    room_id: u64,
+    user_id: u64,
+    title: &str,
+    area_id: u64,
+) -> anyhow::Result<StartLiveOutcome> {
+    let csrf = get_csrf_token().ok_or_else(|| anyhow::anyhow!("无法读取 CSRF Token"))?;
+    update_room_info(room_id, Some(title), Some(area_id), &csrf).await?;
+    let timestamp = get_timestamp().await?;
+    let version = get_live_version(timestamp).await?;
+    let response = start_live(room_id, area_id, &csrf, version, timestamp).await?;
+
+    if response.code == 60024 || response.code == 60043 {
+        let url = response
+            .data
+            .and_then(|data| data.qr)
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| {
+                format!("https://www.bilibili.com/blackboard/live/face-auth-middle.html?source_event=400&mid={user_id}").into()
+            });
+        return Ok(StartLiveOutcome::FaceVerification(url));
+    }
+    if response.code != 0 {
+        return Err(anyhow::anyhow!(response.message.to_string()));
+    }
+
+    let data = response.data.ok_or(Error::EmptyPayload)?;
+    let mut protocols = vec![StreamProtocol {
+        name: "RTMP".into(),
+        addr: data.rtmp.addr,
+        code: data.rtmp.code,
+    }];
+    for protocol in data.protocols.into_iter().flatten() {
+        protocols.push(StreamProtocol {
+            name: protocol.protocol.to_uppercase().into(),
+            addr: protocol.addr,
+            code: protocol.code,
+        });
+    }
+    dedupe_protocol_names(&mut protocols);
+    Ok(StartLiveOutcome::Started(protocols))
+}
+
+pub async fn stop_live_session(room_id: u64) -> anyhow::Result<()> {
+    let csrf = get_csrf_token().ok_or_else(|| anyhow::anyhow!("无法读取 CSRF Token"))?;
+    stop_live(room_id, &csrf).await?;
+    Ok(())
+}
+
+fn dedupe_protocol_names(protocols: &mut [StreamProtocol]) {
+    let mut totals = HashMap::new();
+    for protocol in protocols.iter() {
+        *totals.entry(protocol.name.clone()).or_insert(0usize) += 1;
+    }
+    let mut seen = HashMap::new();
+    for protocol in protocols {
+        if totals[&protocol.name] > 1 {
+            let count = seen.entry(protocol.name.clone()).or_insert(0usize);
+            *count += 1;
+            protocol.name = format!("{} {}", protocol.name, count).into();
+        }
+    }
 }
 
 pub fn app_sign(mut params: Vec<(&str, serde_json::Value)>) -> Vec<(&str, serde_json::Value)> {
