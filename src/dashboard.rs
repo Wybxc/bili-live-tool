@@ -2,7 +2,6 @@ use gpui::*;
 use gpui_component::{ActiveTheme, v_flex};
 
 use crate::{
-    app_event::NotificationEvent,
     broadcast_panel::BroadcastPanel,
     login_page::UserSession,
     profile_header::{ProfileHeader, ProfileHeaderEvent},
@@ -19,7 +18,6 @@ pub struct Dashboard {
 }
 
 impl EventEmitter<DashboardEvent> for Dashboard {}
-impl EventEmitter<NotificationEvent> for Dashboard {}
 
 impl Dashboard {
     pub fn new(session: UserSession, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -37,11 +35,6 @@ impl Dashboard {
                 let ProfileHeaderEvent::Logout = event;
                 cx.emit(DashboardEvent::Logout);
             },
-        ));
-        this.subscriptions.push(cx.subscribe_in(
-            &broadcast,
-            window,
-            |_, _, event: &NotificationEvent, _, cx| cx.emit(event.clone()),
         ));
         this
     }

@@ -8,7 +8,7 @@ use gpui_component::{
     h_flex,
 };
 
-use crate::login_page::UserSession;
+use crate::{login_page::UserSession, utils::weak_update};
 
 pub enum ProfileHeaderEvent {
     Logout,
@@ -42,12 +42,7 @@ impl ProfileHeader {
                 Ok(image) => AvatarState::Ready(image),
                 Err(_) => AvatarState::Failed,
             };
-            let _ = cx.update(|_, cx| {
-                weak.update(cx, |this, cx| {
-                    this.avatar = avatar;
-                    cx.notify();
-                })
-            });
+            weak_update(cx, &weak, |this, _| this.avatar = avatar);
         })
         .detach();
         this

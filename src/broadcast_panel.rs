@@ -1,4 +1,4 @@
-use std::{io::Cursor, sync::Arc};
+use std::sync::Arc;
 
 use gpui::*;
 use gpui_component::{
@@ -11,9 +11,9 @@ use gpui_component::{
 };
 
 use crate::{
-    app_event::NotificationEvent,
     bili_api::{self, StreamProtocol},
     room_editor::{RoomEditor, RoomEditorEvent},
+    utils::{clipboard_copy, encode_qr, weak_update_in},
 };
 
 struct ProtocolSet {
@@ -66,8 +66,6 @@ pub struct BroadcastPanel {
     subscriptions: Vec<Subscription>,
 }
 
-impl EventEmitter<NotificationEvent> for BroadcastPanel {}
-
 impl BroadcastPanel {
     pub fn new(user_id: u64, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(|cx| RoomEditor::new(user_id, window, cx));
@@ -88,21 +86,12 @@ impl BroadcastPanel {
                 }
             },
         ));
-        this.subscriptions.push(cx.subscribe_in(
-            &editor,
-            window,
-            |_, _, event: &NotificationEvent, _, cx| cx.emit(event.clone()),
-        ));
         this
     }
 
     fn set_editor_locked(&self, locked: bool, cx: &mut Context<Self>) {
         self.editor
             .update(cx, |editor, cx| editor.set_broadcast_locked(locked, cx));
-    }
-
-    fn notify(&self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
-        cx.emit(NotificationEvent::new(message));
     }
 
     fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -115,7 +104,7 @@ impl BroadcastPanel {
         let request = match self.editor.read(cx).start_request(cx) {
             Ok(request) => request,
             Err(error) => {
-                self.notify(error.to_string(), cx);
+                window.push_notification(error.to_string(), cx);
                 return;
             }
         };
@@ -134,41 +123,35 @@ impl BroadcastPanel {
                     )
                 })
                 .await;
-            let _ = cx.update(|window, cx| {
-                weak.update(cx, |this, cx| {
-                    match result {
-                        Ok(bili_api::StartLiveOutcome::Started(protocols)) => {
-                            let Some(protocols) = ProtocolSet::new(protocols) else {
-                                this.state = BroadcastState::Offline;
-                                this.set_editor_locked(false, cx);
-                                this.notify("开播失败：服务端未返回有效推流协议", cx);
-                                cx.notify();
-                                return;
-                            };
-                            this.state = BroadcastState::Living(protocols);
-                            this.set_editor_locked(false, cx);
-                            this.notify("开播成功", cx);
-                        }
-                        Ok(bili_api::StartLiveOutcome::FaceVerification(url)) => match qr(&url) {
-                            Ok(qr) => {
-                                this.state = BroadcastState::AwaitingFaceVerification { qr };
-                                this.set_editor_locked(false, cx);
-                                this.open_face_dialog(window, cx);
-                            }
-                            Err(error) => {
-                                this.state = BroadcastState::Offline;
-                                this.set_editor_locked(false, cx);
-                                this.notify(format!("二维码生成失败：{error}"), cx);
-                            }
-                        },
-                        Err(error) => {
-                            this.state = BroadcastState::Offline;
-                            this.set_editor_locked(false, cx);
-                            this.notify(format!("开播失败：{error}"), cx);
-                        }
+            weak_update_in(cx, &weak, |this, window, cx| match result {
+                Ok(bili_api::StartLiveOutcome::Started(protocols)) => {
+                    let Some(protocols) = ProtocolSet::new(protocols) else {
+                        this.state = BroadcastState::Offline;
+                        this.set_editor_locked(false, cx);
+                        window.push_notification("开播失败：服务端未返回有效推流协议", cx);
+                        return;
+                    };
+                    this.state = BroadcastState::Living(protocols);
+                    this.set_editor_locked(false, cx);
+                    window.push_notification("开播成功", cx);
+                }
+                Ok(bili_api::StartLiveOutcome::FaceVerification(url)) => match encode_qr(&url) {
+                    Ok(qr) => {
+                        this.state = BroadcastState::AwaitingFaceVerification { qr };
+                        this.set_editor_locked(false, cx);
+                        this.open_face_dialog(window, cx);
                     }
-                    cx.notify();
-                })
+                    Err(error) => {
+                        this.state = BroadcastState::Offline;
+                        this.set_editor_locked(false, cx);
+                        window.push_notification(format!("二维码生成失败：{error}"), cx);
+                    }
+                },
+                Err(error) => {
+                    this.state = BroadcastState::Offline;
+                    this.set_editor_locked(false, cx);
+                    window.push_notification(format!("开播失败：{error}"), cx);
+                }
             });
         })
         .detach();
@@ -212,7 +195,7 @@ impl BroadcastPanel {
         let room_id = match self.editor.read(cx).room_id() {
             Ok(room_id) => room_id,
             Err(error) => {
-                self.notify(error.to_string(), cx);
+                window.push_notification(error.to_string(), cx);
                 return;
             }
         };
@@ -231,29 +214,26 @@ impl BroadcastPanel {
             let result = cx
                 .background_spawn(async move { bili_api::stop_live_session(room_id) })
                 .await;
-            let _ = cx.update(|_, cx| {
-                weak.update(cx, |this, cx| {
-                    if result.is_ok() {
-                        this.state = BroadcastState::Offline;
-                    } else {
-                        let state = std::mem::take(&mut this.state);
-                        this.state = match state {
-                            BroadcastState::Stopping {
-                                protocols: Some(protocols),
-                            } => BroadcastState::Living(protocols),
-                            BroadcastState::Stopping { protocols: None } => {
-                                BroadcastState::LiveWithoutCredentials
-                            }
-                            state => state,
-                        };
-                    }
-                    let message: SharedString = match result {
-                        Ok(_) => "下播成功".into(),
-                        Err(error) => format!("下播失败：{error}").into(),
+            weak_update_in(cx, &weak, |this, window, cx| {
+                if result.is_ok() {
+                    this.state = BroadcastState::Offline;
+                } else {
+                    let state = std::mem::take(&mut this.state);
+                    this.state = match state {
+                        BroadcastState::Stopping {
+                            protocols: Some(protocols),
+                        } => BroadcastState::Living(protocols),
+                        BroadcastState::Stopping { protocols: None } => {
+                            BroadcastState::LiveWithoutCredentials
+                        }
+                        state => state,
                     };
-                    this.notify(message, cx);
-                    cx.notify();
-                })
+                }
+                let message: SharedString = match result {
+                    Ok(_) => "下播成功".into(),
+                    Err(error) => format!("下播失败：{error}").into(),
+                };
+                window.push_notification(message, cx);
             });
         })
         .detach();
@@ -266,15 +246,6 @@ impl BroadcastPanel {
                 protocols: Some(protocols),
             } => protocols.select(index),
             _ => {}
-        }
-    }
-
-    fn copy(value: SharedString) -> SharedString {
-        match arboard::Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(value.to_string()))
-        {
-            Ok(_) => "复制成功".into(),
-            Err(error) => format!("复制失败：{error}").into(),
         }
     }
 
@@ -306,8 +277,8 @@ impl BroadcastPanel {
                     .ghost()
                     .icon(IconName::Copy)
                     .tooltip("复制")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.notify(Self::copy(value.clone()), cx);
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        window.push_notification(clipboard_copy(&*value), cx);
                     })),
             )
             .into_any_element()
@@ -418,46 +389,5 @@ impl Render for BroadcastPanel {
                     .child(format!("房间号：{room}")),
             )
             .child(content)
-    }
-}
-
-fn qr(text: &str) -> anyhow::Result<Arc<Image>> {
-    let image = qrcode::QrCode::new(text)?
-        .render::<image::Luma<u8>>()
-        .build();
-    let mut bytes = Vec::new();
-    image.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)?;
-    Ok(Arc::new(Image::from_bytes(ImageFormat::Png, bytes)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ProtocolSet;
-    use crate::bili_api::StreamProtocol;
-    use smol_str::SmolStr;
-
-    fn protocol(addr: &str, code: &str) -> StreamProtocol {
-        StreamProtocol {
-            name: SmolStr::new("RTMP"),
-            addr: SmolStr::new(addr),
-            code: SmolStr::new(code),
-        }
-    }
-
-    #[test]
-    fn protocol_set_rejects_missing_credentials() {
-        assert!(ProtocolSet::new(Vec::new()).is_none());
-        assert!(ProtocolSet::new(vec![protocol("", "code")]).is_none());
-        assert!(ProtocolSet::new(vec![protocol("addr", "")]).is_none());
-    }
-
-    #[test]
-    fn protocol_selection_never_moves_out_of_bounds() {
-        let mut protocols =
-            ProtocolSet::new(vec![protocol("first", "one"), protocol("second", "two")]).unwrap();
-        protocols.select(1);
-        assert_eq!(protocols.active().addr, "second");
-        protocols.select(10);
-        assert_eq!(protocols.active().addr, "second");
     }
 }

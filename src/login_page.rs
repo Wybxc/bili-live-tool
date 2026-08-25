@@ -1,11 +1,11 @@
-use std::{io::Cursor, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use gpui::*;
 use gpui_component::{ActiveTheme, IconName, Sizable, StyledExt, button::Button, spinner::Spinner};
 
 use crate::{
     bili_api,
-    utils::{weak_emit, weak_read, weak_update},
+    utils::{encode_qr, weak_emit, weak_read, weak_update},
 };
 
 #[derive(Clone)]
@@ -249,13 +249,4 @@ impl Render for LoginPage {
                     .on_click(cx.listener(|this, _, window, cx| this.refresh_qr(window, cx))),
             )
     }
-}
-
-fn encode_qr(text: &str) -> anyhow::Result<Arc<Image>> {
-    let image = qrcode::QrCode::new(text)?
-        .render::<image::Luma<u8>>()
-        .build();
-    let mut bytes = Vec::new();
-    image.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)?;
-    Ok(Arc::new(Image::from_bytes(ImageFormat::Png, bytes)))
 }

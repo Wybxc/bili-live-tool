@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui::*;
 use gpui_component::{
-    ActiveTheme, Disableable, IndexPath,
+    ActiveTheme, Disableable, IndexPath, WindowExt,
     button::Button,
     h_flex,
     input::{Input, InputState},
@@ -11,8 +11,8 @@ use gpui_component::{
 };
 
 use crate::{
-    app_event::NotificationEvent,
     bili_api::{self, Area},
+    utils::{weak_update, weak_update_in},
 };
 
 #[derive(Clone)]
@@ -71,7 +71,6 @@ pub struct RoomEditor {
 }
 
 impl EventEmitter<RoomEditorEvent> for RoomEditor {}
-impl EventEmitter<NotificationEvent> for RoomEditor {}
 
 impl RoomEditor {
     pub fn new(user_id: u64, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -136,20 +135,14 @@ impl RoomEditor {
                 .map(Arc::new)
             {
                 Ok(areas) => {
-                    let _ = cx.update(|window, cx| {
-                        weak.update(cx, |this, cx| {
-                            this.install_areas(areas, window, cx);
-                            cx.notify();
-                        })
+                    weak_update_in(cx, &weak, |this, window, cx| {
+                        this.install_areas(areas, window, cx)
                     });
                 }
                 Err(error) => {
-                    let _ = cx.update(|_, cx| {
-                        weak.update(cx, |this, cx| {
-                            this.areas = AreaState::Failed;
-                            this.notify(format!("分区列表加载失败：{error}"), cx);
-                            cx.notify();
-                        })
+                    weak_update_in(cx, &weak, |this, window, cx| {
+                        this.areas = AreaState::Failed;
+                        this.notify(format!("分区列表加载失败：{error}"), window, cx);
                     });
                 }
             }
@@ -163,52 +156,48 @@ impl RoomEditor {
             .background_spawn(async move { bili_api::get_room_id(user_id) })
             .await;
         let Ok(room) = room else {
-            let _ = cx.update(|_, cx| {
-                weak.update(cx, |this, cx| {
-                    this.room = RoomState::Failed;
-                    this.notify(format!("房间号获取失败：{}", room.unwrap_err()), cx);
-                    cx.notify();
-                })
+            weak_update_in(cx, &weak, |this, window, cx| {
+                this.room = RoomState::Failed;
+                this.notify(format!("房间号获取失败：{}", room.unwrap_err()), window, cx);
             });
             return;
         };
         let room_id = room.room_id;
-        let _ = cx.update(|_, cx| {
-            weak.update(cx, |this, cx| {
-                this.room = RoomState::LoadingDetails;
-                cx.notify();
-            })
-        });
+        weak_update(cx, &weak, |this, _| this.room = RoomState::LoadingDetails);
         let info = cx
             .background_spawn(async move { bili_api::get_room_info(room_id) })
             .await;
         let Ok(info) = info else {
-            let _ = cx.update(|_, cx| {
-                weak.update(cx, |this, cx| {
-                    this.room = RoomState::Failed;
-                    this.notify(format!("房间信息获取失败：{}", info.unwrap_err()), cx);
-                    cx.notify();
-                })
+            weak_update_in(cx, &weak, |this, window, cx| {
+                this.room = RoomState::Failed;
+                this.notify(
+                    format!("房间信息获取失败：{}", info.unwrap_err()),
+                    window,
+                    cx,
+                );
             });
             return;
         };
         let title = info.title.to_string();
-        let _ = cx.update(|window, cx| {
-            weak.update(cx, |this, cx| {
-                this.room = RoomState::Ready(room_id);
-                this.title
-                    .update(cx, |state, cx| state.set_value(title, window, cx));
-                this.select_area(info.parent_area_id, info.area_id, window, cx);
-                if info.live_status == bili_api::LiveStatus::Living {
-                    cx.emit(RoomEditorEvent::LiveRestored);
-                }
-                cx.notify();
-            })
+        weak_update_in(cx, &weak, |this, window, cx| {
+            this.room = RoomState::Ready(room_id);
+            this.title
+                .update(cx, |state, cx| state.set_value(title, window, cx));
+            this.select_area(info.parent_area_id, info.area_id, window, cx);
+            if info.live_status == bili_api::LiveStatus::Living {
+                cx.emit(RoomEditorEvent::LiveRestored);
+            }
         });
     }
 
-    fn notify(&self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
-        cx.emit(NotificationEvent::new(message));
+    fn notify(
+        &self,
+        message: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let message: SharedString = message.into();
+        window.push_notification(message, cx);
     }
 
     pub fn room_id(&self) -> anyhow::Result<u64> {
@@ -372,13 +361,13 @@ impl RoomEditor {
             return;
         }
         let Ok(room_id) = self.room_id() else {
-            self.notify("房间信息尚未就绪", cx);
+            self.notify("房间信息尚未就绪", window, cx);
             return;
         };
         let title_value = self.title.read(cx).value().to_string();
         let area_id = if area {
             let Ok(area_id) = self.area_id() else {
-                self.notify("分区列表尚未就绪", cx);
+                self.notify("分区列表尚未就绪", window, cx);
                 return;
             };
             Some(area_id)
@@ -397,16 +386,13 @@ impl RoomEditor {
                     )
                 })
                 .await;
-            let _ = cx.update(|_, cx| {
-                weak.update(cx, |this, cx| {
-                    this.update = UpdateState::Idle;
-                    let message: SharedString = match result {
-                        Ok(_) => "更新成功".into(),
-                        Err(error) => format!("更新失败：{error}").into(),
-                    };
-                    this.notify(message, cx);
-                    cx.notify();
-                })
+            weak_update_in(cx, &weak, |this, window, cx| {
+                this.update = UpdateState::Idle;
+                let message: SharedString = match result {
+                    Ok(_) => "更新成功".into(),
+                    Err(error) => format!("更新失败：{error}").into(),
+                };
+                this.notify(message, window, cx);
             });
         })
         .detach();
