@@ -16,6 +16,7 @@ use crate::{
     utils::{clipboard_copy, encode_qr, weak_update_in},
 };
 
+#[derive(Clone)]
 struct ProtocolSet {
     items: Box<[StreamProtocol]>,
     active: usize,
@@ -49,9 +50,7 @@ enum BroadcastState {
     #[default]
     Offline,
     Starting,
-    AwaitingFaceVerification {
-        qr: Arc<Image>,
-    },
+    AwaitingFaceVerification,
     LiveWithoutCredentials,
     Living(ProtocolSet),
     Stopping {
@@ -64,6 +63,171 @@ pub struct BroadcastPanel {
     editor: Entity<RoomEditor>,
     state: BroadcastState,
     subscriptions: Vec<Subscription>,
+}
+
+#[derive(IntoElement)]
+struct FaceVerificationContent {
+    qr: Arc<Image>,
+}
+
+impl RenderOnce for FaceVerificationContent {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        DialogContent::new()
+            .v_flex()
+            .items_center()
+            .gap_4()
+            .child("请使用 B 站 APP 扫码完成人脸验证")
+            .child(img(self.qr).size_64())
+    }
+}
+
+#[derive(IntoElement)]
+struct FaceVerificationActions {
+    panel: WeakEntity<BroadcastPanel>,
+}
+
+impl RenderOnce for FaceVerificationActions {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        DialogFooter::new().child(
+            Button::new("verified")
+                .primary()
+                .label("我已完成验证")
+                .on_click(move |_, window, cx| {
+                    window.close_dialog(cx);
+                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
+                }),
+        )
+    }
+}
+
+#[derive(IntoElement)]
+struct BroadcastSetup {
+    editor: Entity<RoomEditor>,
+    panel: WeakEntity<BroadcastPanel>,
+    starting: bool,
+    awaiting_verification: bool,
+}
+
+impl RenderOnce for BroadcastSetup {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        v_flex().gap_5().child(self.editor).child(
+            Button::new("start")
+                .primary()
+                .icon(IconName::Play)
+                .label(if self.awaiting_verification {
+                    "重新验证"
+                } else {
+                    "开始直播"
+                })
+                .loading(self.starting)
+                .on_click(move |_, window, cx| {
+                    let _ = self.panel.update(cx, |this, cx| this.start(window, cx));
+                }),
+        )
+    }
+}
+
+#[derive(IntoElement)]
+struct ProtocolLine {
+    id: &'static str,
+    label: &'static str,
+    value: SharedString,
+}
+
+impl RenderOnce for ProtocolLine {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let value = self.value;
+        h_flex()
+            .gap_3()
+            .child(
+                div()
+                    .w_16()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.label),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(value.clone()),
+            )
+            .child(
+                Button::new(self.id)
+                    .ghost()
+                    .icon(IconName::Copy)
+                    .tooltip("复制")
+                    .on_click(move |_, window, cx| {
+                        window.push_notification(clipboard_copy(&*value), cx);
+                    }),
+            )
+    }
+}
+
+#[derive(IntoElement)]
+struct ProtocolPanel {
+    protocols: Option<ProtocolSet>,
+    panel: WeakEntity<BroadcastPanel>,
+    stopping: bool,
+}
+
+impl RenderOnce for ProtocolPanel {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let details = if let Some(protocols) = self.protocols {
+            let panel = self.panel.clone();
+            let tabs = protocols.items.iter().fold(
+                TabBar::new("protocols")
+                    .selected_index(protocols.active)
+                    .on_click(move |index: &usize, _, cx| {
+                        let _ = panel.update(cx, |this, cx| {
+                            this.select_protocol(*index);
+                            cx.notify();
+                        });
+                    }),
+                |tabs, protocol| tabs.child(Tab::new().label(protocol.name.to_string())),
+            );
+            let protocol = protocols.active();
+            v_flex()
+                .child(tabs)
+                .child(
+                    v_flex()
+                        .gap_4()
+                        .p_4()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .rounded_b_lg()
+                        .child(ProtocolLine {
+                            id: "copy-address",
+                            label: "服务器",
+                            value: protocol.addr.as_str().into(),
+                        })
+                        .child(ProtocolLine {
+                            id: "copy-code",
+                            label: "推流码",
+                            value: protocol.code.as_str().into(),
+                        }),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .p_4()
+                .text_color(cx.theme().muted_foreground)
+                .child("当前直播不是由本次会话启动，无法恢复推流码")
+                .into_any_element()
+        };
+        let panel = self.panel;
+        v_flex().gap_5().child(details).child(
+            Button::new("stop")
+                .danger()
+                .icon(IconName::Close)
+                .label("结束直播")
+                .loading(self.stopping)
+                .on_click(move |_, window, cx| {
+                    let _ = panel.update(cx, |this, cx| this.stop(window, cx));
+                }),
+        )
+    }
 }
 
 impl BroadcastPanel {
@@ -97,7 +261,7 @@ impl BroadcastPanel {
     fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !matches!(
             self.state,
-            BroadcastState::Offline | BroadcastState::AwaitingFaceVerification { .. }
+            BroadcastState::Offline | BroadcastState::AwaitingFaceVerification
         ) {
             return;
         }
@@ -137,9 +301,17 @@ impl BroadcastPanel {
                 }
                 Ok(bili_api::StartLiveOutcome::FaceVerification(url)) => match encode_qr(&url) {
                     Ok(qr) => {
-                        this.state = BroadcastState::AwaitingFaceVerification { qr };
+                        this.state = BroadcastState::AwaitingFaceVerification;
                         this.set_editor_locked(false, cx);
-                        this.open_face_dialog(window, cx);
+                        let panel = cx.entity().downgrade();
+                        window.open_dialog(cx, move |dialog, _, _| {
+                            dialog
+                                .title("人脸验证")
+                                .child(FaceVerificationContent { qr: qr.clone() })
+                                .footer(FaceVerificationActions {
+                                    panel: panel.clone(),
+                                })
+                        });
                     }
                     Err(error) => {
                         this.state = BroadcastState::Offline;
@@ -155,40 +327,6 @@ impl BroadcastPanel {
             });
         })
         .detach();
-    }
-
-    fn open_face_dialog(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let BroadcastState::AwaitingFaceVerification { qr } = &self.state else {
-            return;
-        };
-        let qr = qr.clone();
-        let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, _| {
-            dialog
-                .title("人脸验证")
-                .child(
-                    DialogContent::new()
-                        .v_flex()
-                        .items_center()
-                        .gap_4()
-                        .child("请使用 B 站 APP 扫码完成人脸验证")
-                        .child(img(qr.clone()).size_64()),
-                )
-                .footer(
-                    DialogFooter::new().child(
-                        Button::new("verified")
-                            .primary()
-                            .label("我已完成验证")
-                            .on_click({
-                                let weak = weak.clone();
-                                move |_, window, cx| {
-                                    window.close_dialog(cx);
-                                    let _ = weak.update(cx, |this, cx| this.start(window, cx));
-                                }
-                            }),
-                    ),
-                )
-        });
     }
 
     fn stop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -248,137 +386,43 @@ impl BroadcastPanel {
             _ => {}
         }
     }
-
-    fn protocol_line(
-        &self,
-        id: &'static str,
-        label: &'static str,
-        value: SharedString,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        h_flex()
-            .gap_3()
-            .child(
-                div()
-                    .w_16()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(label),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .child(value.clone()),
-            )
-            .child(
-                Button::new(id)
-                    .ghost()
-                    .icon(IconName::Copy)
-                    .tooltip("复制")
-                    .on_click(cx.listener(move |_, _, window, cx| {
-                        window.push_notification(clipboard_copy(&*value), cx);
-                    })),
-            )
-            .into_any_element()
-    }
-
-    fn render_setup(&self, cx: &mut Context<Self>) -> AnyElement {
-        let starting = matches!(self.state, BroadcastState::Starting);
-        v_flex()
-            .gap_5()
-            .child(self.editor.clone())
-            .child(
-                Button::new("start")
-                    .primary()
-                    .icon(IconName::Play)
-                    .label(
-                        if matches!(self.state, BroadcastState::AwaitingFaceVerification { .. }) {
-                            "重新验证"
-                        } else {
-                            "开始直播"
-                        },
-                    )
-                    .loading(starting)
-                    .on_click(cx.listener(|this, _, window, cx| this.start(window, cx))),
-            )
-            .into_any_element()
-    }
-
-    fn render_protocols(&self, cx: &mut Context<Self>) -> AnyElement {
-        let (protocols, stopping) = match &self.state {
-            BroadcastState::Living(protocols) => (Some(protocols), false),
-            BroadcastState::Stopping { protocols } => (protocols.as_ref(), true),
-            BroadcastState::LiveWithoutCredentials => (None, false),
-            _ => return div().into_any_element(),
-        };
-        let details = if let Some(protocols) = protocols {
-            let tabs = protocols.items.iter().fold(
-                TabBar::new("protocols")
-                    .selected_index(protocols.active)
-                    .on_click(cx.listener(|this, index: &usize, _, cx| {
-                        this.select_protocol(*index);
-                        cx.notify();
-                    })),
-                |tabs, protocol| tabs.child(Tab::new().label(protocol.name.to_string())),
-            );
-            let protocol = protocols.active();
-            v_flex()
-                .child(tabs)
-                .child(
-                    v_flex()
-                        .gap_4()
-                        .p_4()
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .rounded_b_lg()
-                        .child(self.protocol_line(
-                            "copy-address",
-                            "服务器",
-                            protocol.addr.as_str().into(),
-                            cx,
-                        ))
-                        .child(self.protocol_line(
-                            "copy-code",
-                            "推流码",
-                            protocol.code.as_str().into(),
-                            cx,
-                        )),
-                )
-                .into_any_element()
-        } else {
-            div()
-                .p_4()
-                .text_color(cx.theme().muted_foreground)
-                .child("当前直播不是由本次会话启动，无法恢复推流码")
-                .into_any_element()
-        };
-        v_flex()
-            .gap_5()
-            .child(details)
-            .child(
-                Button::new("stop")
-                    .danger()
-                    .icon(IconName::Close)
-                    .label("结束直播")
-                    .loading(stopping)
-                    .on_click(cx.listener(|this, _, window, cx| this.stop(window, cx))),
-            )
-            .into_any_element()
-    }
 }
 
 impl Render for BroadcastPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let room = self.editor.read(cx).room_label();
-        let content = match self.state {
+        let panel = cx.entity().downgrade();
+        let content = match &self.state {
             BroadcastState::Offline
             | BroadcastState::Starting
-            | BroadcastState::AwaitingFaceVerification { .. } => self.render_setup(cx),
-            BroadcastState::LiveWithoutCredentials
-            | BroadcastState::Living(_)
-            | BroadcastState::Stopping { .. } => self.render_protocols(cx),
+            | BroadcastState::AwaitingFaceVerification => BroadcastSetup {
+                editor: self.editor.clone(),
+                panel,
+                starting: matches!(self.state, BroadcastState::Starting),
+                awaiting_verification: matches!(
+                    self.state,
+                    BroadcastState::AwaitingFaceVerification
+                ),
+            }
+            .into_any_element(),
+            BroadcastState::LiveWithoutCredentials => ProtocolPanel {
+                protocols: None,
+                panel,
+                stopping: false,
+            }
+            .into_any_element(),
+            BroadcastState::Living(protocols) => ProtocolPanel {
+                protocols: Some(protocols.clone()),
+                panel,
+                stopping: false,
+            }
+            .into_any_element(),
+            BroadcastState::Stopping { protocols } => ProtocolPanel {
+                protocols: protocols.clone(),
+                panel,
+                stopping: true,
+            }
+            .into_any_element(),
         };
         v_flex()
             .gap_5()

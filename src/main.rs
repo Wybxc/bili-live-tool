@@ -83,6 +83,7 @@ impl AppView {
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let notification_layer = Root::render_notification_layer(window, cx);
+        let dialog_layer = Root::render_dialog_layer(window, cx);
         div()
             .size_full()
             .child(match &self.page {
@@ -90,6 +91,7 @@ impl Render for AppView {
                 AppPage::Dashboard { view, .. } => view.clone().into_any_element(),
             })
             .children(notification_layer)
+            .children(dialog_layer)
     }
 }
 
