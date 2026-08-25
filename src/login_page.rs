@@ -1,6 +1,5 @@
 use std::{io::Cursor, sync::Arc, time::Duration};
 
-use async_compat::Compat;
 use gpui::*;
 use gpui_component::{ActiveTheme, IconName, Sizable, StyledExt, button::Button, spinner::Spinner};
 
@@ -86,7 +85,10 @@ impl LoginPage {
     fn restore_or_start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let generation = self.state.generation();
         cx.spawn_in(window, async move |weak, cx| {
-            match Compat::new(bili_api::get_nav_user_info()).await {
+            match cx
+                .background_spawn(async { bili_api::get_nav_user_info() })
+                .await
+            {
                 Ok(info) if info.is_login => {
                     let Ok(session) = UserSession::try_from(info) else {
                         let _ = cx.update(|window, cx| {
@@ -161,7 +163,9 @@ impl LoginPage {
         self.state = LoginState::LoadingQr { generation };
         cx.notify();
         cx.spawn_in(window, async move |weak, cx| {
-            let response = Compat::new(bili_api::generate_passport_qrcode()).await;
+            let response = cx
+                .background_spawn(async { bili_api::generate_passport_qrcode() })
+                .await;
             let Ok(response) = response else {
                 let message = format!("二维码加载失败：{}", response.unwrap_err());
                 let _ = cx.update(|_, cx| {
@@ -199,7 +203,9 @@ impl LoginPage {
                 })
             });
             loop {
-                Compat::new(tokio::time::sleep(Duration::from_millis(1500))).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(1500))
+                    .await;
                 let active = cx
                     .update(|_, cx| {
                         weak.upgrade().is_some_and(|entity| {
@@ -218,12 +224,20 @@ impl LoginPage {
                 if !active {
                     break;
                 }
-                let Ok(result) = Compat::new(bili_api::poll_passport_qrcode_status(&key)).await
+                let poll_key = key.clone();
+                let Ok(result) = cx
+                    .background_spawn(
+                        async move { bili_api::poll_passport_qrcode_status(&poll_key) },
+                    )
+                    .await
                 else {
                     continue;
                 };
                 if result.code == bili_api::PollPassportQrcodeStatusCode::Success {
-                    let Ok(info) = Compat::new(bili_api::get_nav_user_info()).await else {
+                    let Ok(info) = cx
+                        .background_spawn(async { bili_api::get_nav_user_info() })
+                        .await
+                    else {
                         break;
                     };
                     let Ok(session) = UserSession::try_from(info) else {

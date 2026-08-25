@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_compat::Compat;
 use gpui::*;
 use gpui_component::{
     ActiveTheme, IconName, Sizable, ThemeMode,
@@ -36,7 +35,10 @@ impl ProfileHeader {
         };
         let face_url = session.face_url.clone();
         cx.spawn_in(window, async move |weak, cx| {
-            let avatar = match Compat::new(load_avatar(&face_url)).await {
+            let avatar = match cx
+                .background_spawn(async move { load_avatar(&face_url) })
+                .await
+            {
                 Ok(image) => AvatarState::Ready(image),
                 Err(_) => AvatarState::Failed,
             };
@@ -88,10 +90,8 @@ impl Render for ProfileHeader {
     }
 }
 
-async fn load_avatar(url: &str) -> anyhow::Result<Arc<Image>> {
-    let bytes = reqwest::get(url).await?.bytes().await?;
-    Ok(Arc::new(Image::from_bytes(
-        ImageFormat::Png,
-        bytes.to_vec(),
-    )))
+fn load_avatar(url: &str) -> anyhow::Result<Arc<Image>> {
+    let mut response = ureq::get(url).call()?;
+    let bytes = response.body_mut().read_to_vec()?;
+    Ok(Arc::new(Image::from_bytes(ImageFormat::Png, bytes)))
 }

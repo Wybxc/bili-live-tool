@@ -1,6 +1,5 @@
 use std::{io::Cursor, sync::Arc};
 
-use async_compat::Compat;
 use gpui::*;
 use gpui_component::{
     ActiveTheme, IconName, StyledExt, WindowExt,
@@ -125,13 +124,16 @@ impl BroadcastPanel {
         self.set_editor_locked(true, cx);
         cx.notify();
         cx.spawn_in(window, async move |weak, cx| {
-            let result = Compat::new(bili_api::start_live_session(
-                request.room_id,
-                user_id,
-                &request.title,
-                request.area_id,
-            ))
-            .await;
+            let result = cx
+                .background_spawn(async move {
+                    bili_api::start_live_session(
+                        request.room_id,
+                        user_id,
+                        &request.title,
+                        request.area_id,
+                    )
+                })
+                .await;
             let _ = cx.update(|window, cx| {
                 weak.update(cx, |this, cx| {
                     match result {
@@ -226,7 +228,9 @@ impl BroadcastPanel {
         self.state = BroadcastState::Stopping { protocols };
         cx.notify();
         cx.spawn_in(window, async move |weak, cx| {
-            let result = Compat::new(bili_api::stop_live_session(room_id)).await;
+            let result = cx
+                .background_spawn(async move { bili_api::stop_live_session(room_id) })
+                .await;
             let _ = cx.update(|_, cx| {
                 weak.update(cx, |this, cx| {
                     if result.is_ok() {

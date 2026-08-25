@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_compat::Compat;
 use gpui::*;
 use gpui_component::{
     ActiveTheme, Disableable, IndexPath,
@@ -131,7 +130,8 @@ impl RoomEditor {
 
     fn initialize(&mut self, user_id: u64, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |weak, cx| {
-            match Compat::new(bili_api::get_live_area_list())
+            match cx
+                .background_spawn(async { bili_api::get_live_area_list() })
                 .await
                 .map(Arc::new)
             {
@@ -159,7 +159,9 @@ impl RoomEditor {
     }
 
     async fn load_room(weak: WeakEntity<Self>, user_id: u64, cx: &mut AsyncWindowContext) {
-        let room = Compat::new(bili_api::get_room_id(user_id)).await;
+        let room = cx
+            .background_spawn(async move { bili_api::get_room_id(user_id) })
+            .await;
         let Ok(room) = room else {
             let _ = cx.update(|_, cx| {
                 weak.update(cx, |this, cx| {
@@ -177,7 +179,9 @@ impl RoomEditor {
                 cx.notify();
             })
         });
-        let info = Compat::new(bili_api::get_room_info(room_id)).await;
+        let info = cx
+            .background_spawn(async move { bili_api::get_room_info(room_id) })
+            .await;
         let Ok(info) = info else {
             let _ = cx.update(|_, cx| {
                 weak.update(cx, |this, cx| {
@@ -384,12 +388,15 @@ impl RoomEditor {
         self.update = UpdateState::Updating;
         cx.notify();
         cx.spawn_in(window, async move |weak, cx| {
-            let result = Compat::new(bili_api::update_live_room(
-                room_id,
-                title.then_some(title_value.as_str()),
-                area_id,
-            ))
-            .await;
+            let result = cx
+                .background_spawn(async move {
+                    bili_api::update_live_room(
+                        room_id,
+                        title.then_some(title_value.as_str()),
+                        area_id,
+                    )
+                })
+                .await;
             let _ = cx.update(|_, cx| {
                 weak.update(cx, |this, cx| {
                     this.update = UpdateState::Idle;
